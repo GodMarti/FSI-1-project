@@ -146,8 +146,8 @@ int llopen(LinkLayer connectionParameters)
 		
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);			
-			while(alarmCount < connectionParameters.nRetrasmissions){
-				while(bytes = read(fd, buf, 1) > 0){
+			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
+				while(bytes = read(fd, buf, 1) > 0 && count < 5){
 					count = checkbyte(buf[0], count);     
 				}
 				/*bytes = read(fd, buf, BUF_SIZE);
@@ -157,7 +157,7 @@ int llopen(LinkLayer connectionParameters)
 					alarmEnabled = TRUE;
 					alarmCount = 3;
 				}*/
-				if (alarmEnabled == FALSE){
+				if (alarmEnabled == FALSE && count < 5){
 					buf[0] = 0x7E;
 					buf[1] = 0x03;
 					buf[2] = 0x03;
@@ -175,6 +175,12 @@ int llopen(LinkLayer connectionParameters)
 				}
 			
 			}
+			sleep(1);
+			while(count < 5 && bytes = read(fd, buf, 1) > 0){
+					count = checkbyte(buf[0], count);     
+				}
+			if (count != 5)
+				return -1;
 			break;
 			
 		case LlRx:
