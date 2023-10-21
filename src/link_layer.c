@@ -352,7 +352,7 @@ int waitHeader(char c, int count){
 			else if (c == 0x7E)
 				return 1;
 			else if (c == frame_num_r ^ 0x40){
-				MANDA ACK
+				sendAck(c);
 				return 0;
 			}
 			
@@ -367,6 +367,23 @@ int waitHeader(char c, int count){
 			return 0;				
 	}
 }
+
+void sendAck(char c){
+	char ack;
+	switch(c){
+		case 0x00:
+			ack = 0x85;
+			break;
+		case 0x40:
+			ack = 0x05;
+			break;
+		default:
+			return;
+	}
+	sendSFrame(0x01, c);
+	
+}
+
 int llread(unsigned char *packet)
 {
     // to wait the header
@@ -409,7 +426,8 @@ int llread(unsigned char *packet)
 		ERRORE ASK FOR RETRANSMISSION
 		return -1;
 	}
-	SEND ACK
+	sendAck(frame_num_r);
+	frame_num_r = frame_num_r ^ 0x40;
 
     return n_bytes;
 }
