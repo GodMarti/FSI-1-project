@@ -15,6 +15,7 @@ struct termios oldtio_r;*/
 int alarmEnabled = FALSE;
 int alarmCount = 0;
 volatile int STOP = FALSE;
+unsigned char frame_num_t = 0x00;
 
 // Alarm function handler
 void alarmHandler(int signal)
@@ -235,13 +236,56 @@ int setconnection(char *serialPort, LinkLayerRole role){
 	return fd;
 }
 
+
+int createFrame(char *buf, int bufSize, char *new_buff){
+	char bcc = 0x00;
+	int i;
+	// to create the bcc
+	for (i = 0; i < bufSize; i ++)
+		ecc = bcc ^ buf[i];
+	int c = 4;
+	// add FH 
+	new_buff[0] = 0x7E;
+	new_buff[1] = 0x03;
+	frame_num_t = frame_num_t ^ 0x40;
+	new_buff[2] = frame_num_t; 
+	new_buff[3] = new_buff[1] ^ new_buff[2];
+	for (i = 0; i < bufSize; i ++){ // make a function for all of the stuffing
+		if (buf[i] == 0x7E){
+			new_buff[c++] = 0x7D;
+			new_buff[c++] = 0x5E;
+		}
+		else if (buf[i] == 0x7D){
+			new_buff[c++] = 0x7D;
+			new_buff[c++] = 0x5D;
+		}
+		else
+			new_buff[c++] = buf[i];
+	}
+	if (bcc == 0x7E){
+			new_buff[c++] = 0x7D;
+			new_buff[c++] = 0x5E;
+		}
+	else if (bcc == 0x7D){
+		new_buff[c++] = 0x7D;
+		new_buff[c++] = 0x5D;
+	}
+	else
+		new_buff[c++] = bcc;
+	// add FT
+	new_buff[c++] = 0x7E;
+	return c;
+}
+
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *buf, int bufSize)
+int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked the teacher if we can
 {
-    // TODO
-
+	char *new_buf = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
+	int n = createFrame(buf, bufSize, new_buff);
+	
+	
     return 0;
 }
 
