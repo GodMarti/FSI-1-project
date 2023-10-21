@@ -16,6 +16,8 @@ int alarmEnabled = FALSE;
 int alarmCount = 0;
 volatile int STOP = FALSE;
 unsigned char frame_num_t = 0x00;
+unsigned char frame_num_r = 0x40;
+LinkLayer parameters;
 
 // Alarm function handler
 void alarmHandler(int signal)
@@ -26,103 +28,54 @@ void alarmHandler(int signal)
     printf("Alarm #%d\n", alarmCount);
 }
 
-int checkbyte(char c, int count, LinkLayerRole role){
-	switch(role){
-		case Lltx:
-			switch(count){
-					case 0:
-						if(c == 0x7E)
-							return 1;
-						else 
-							return 0;
-					case 1:
-						if (c == 0x01)
-							return 2;
-						else if (c == 0x7E)
-							return 1;
-						else return 0;
-					case 2:
-						if (c == 0x07)
-							return 3;
-						else if (c == 0x7E)
-							return 1;
-						else return 0;
-					case 3:
-						if (c == 0x01 ^ 0x07)
-							return 4;
-						else if (c == 0x7E)
-							return 1;
-						else return 0;
-					case 4:
-						if (c == 0x7E)
-							return 5;
-						else return 0;
-					default:
-						return 0;				
-				}
-				break;
-		
-		case LlRx:
-			switch(count){
-				case 0:
-					if(c == 0x7E)
-						return 1;
-					else 
-						return 0;
-				case 1:
-					if (c == 0x03)
-						return 2;
-					else if (c == 0x7E)
-						return 1;
-					else return 0;
-				case 2:
-					if (c == 0x03)
-						return 3;
-					else if (c == 0x7E)
-						return 1;
-					else return 0;
-				case 3:
-					if (c == 0x03 ^ 0x03)
-						return 4;
-					else if (c == 0x7E)
-						return 1;
-					else return 0;
-				case 4:
-					if (c == 0x7E)
-						return 5;
-					else return 0;
-				default:
-					return 0;				
-			}
-			break;
-		
+int checkSframe(char c, int count, char A, char C){
+	switch(count){
+		case 0:
+			if(c == 0x7E)
+				return 1;
+			else 
+				return 0;
+		case 1:
+			if (c == A)
+				return 2;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 2:
+			if (c == C)
+				return 3;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 3:
+			if (c == A ^ C)
+				return 4;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 4:
+			if (c == 0x7E)
+				return 5;
+			else return 0;
 		default:
-			return 0;
+			return 0;				
 	}
-	
 }
 
-int sendSFrame(int fd, LinkLayerRole role){
+int sendSFrame(int fd, char A, char C){
 	unsigned char buf[5];
-	switch(role){
-		case Lltx:
-			buf[1] = 0x03;
-			buf[2] = 0x03;
-			break;
-		case LlRx:
-			buf[1] = 0x01;
-			buf[2] = 0x07;
-			break;
-	}
 	buf[0] = 0x7E;
+	buf[1] = A;
+	buf[2] = C;
 	buf[3] = buf[1] ^ buf[2];
 	buf[4] = buf[0];
-
 	return write(fd, buf, 5);
 }
 
 int llopen(LinkLayer connectionParameters)
 {
+	parameters.timeout = connectionParameters.timeout;
+	parameters.nRetrasmissions = connectionParameters.nRetrasmissions;
     int fd = setconnection(connectionParameters.serialPort);
 	if (fd < 0) 
 	{
@@ -138,7 +91,7 @@ int llopen(LinkLayer connectionParameters)
 			(void)signal(SIGALRM, alarmHandler);			
 			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
 				while(bytes = read(fd, buf, 1) > 0 && count < 5){
-					count = checkbyte(buf[0], count);     
+					count = checkSframe(buf[0], count, 0x01, 0x07);     
 				}
 				/*bytes = read(fd, buf, BUF_SIZE);
 				if (bytes == 5 && buf[1] ^ buf[2] == buf[3] && buf[0] == 0x7E && buf[4] == buf[0] && buf[1] == 0x01 && buf[2] == 0x07){
@@ -148,7 +101,7 @@ int llopen(LinkLayer connectionParameters)
 					alarmCount = 3;
 				}*/
 				if (alarmEnabled == FALSE && count < 5){
-					sendSFrame(fd, LlTx);
+					sendSFrame(fd, 0x03, 0x03);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
@@ -169,12 +122,12 @@ int llopen(LinkLayer connectionParameters)
 		case LlRx:
 			while(count < 5){
 				if(bytes = read(fd, buf, BUF_SIZE) > 0)
-					count = checkbyte(buf[0], count);      
+					count = checkSframe(buf[0], count, 0x03, 0x03);      
 				//sleep(1);
 			}
 			
 			
-			if (sendSFrame(fd, LlRx) != 5)
+			if (sendSFrame(fd, 0x01, 0x07) != 5)
 				return -1;
 		
 			break;
@@ -283,8 +236,32 @@ int createFrame(char *buf, int bufSize, char *new_buff){
 int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked the teacher if we can
 {
 	char *new_buf = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
-	int n = createFrame(buf, bufSize, new_buff);
+	int n_bytes = createFrame(buf, bufSize, new_buff);
+	alarmCount = 0;
+	(void)signal(SIGALRM, alarmHandler);
+	int confirmed = FALSE;	
+	while(alarmCount < parameters.nRetrasmissions && !confirmed){
+		// to be modified: check answer
+		while(bytes = read(fd, buf, 1) > 0 && count < 5){
+			count = checkbyte(buf[0], count);     
+		}
+		if (alarmEnabled == FALSE && count < 5){
+			write(fd, new_buff, n_bytes);
+			// Wait until all bytes have been written to the serial port
+			sleep(1); // NOT SURE YET
+			alarm(parameters.timeout);
+			alarmEnabled = TRUE;
+			
+		}
 	
+	}
+	sleep(1);
+	// to be modified: check answer
+	while(count < 5 && bytes = read(fd, buf, 1) > 0){
+			count = checkbyte(buf[0], count);     
+		}
+	if (count != 5)
+		return -1;
 	
     return 0;
 }
