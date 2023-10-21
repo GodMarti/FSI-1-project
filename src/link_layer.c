@@ -18,6 +18,7 @@ volatile int STOP = FALSE;
 unsigned char frame_num_t = 0x00;
 unsigned char frame_num_r = 0x40;
 LinkLayer parameters;
+int fd;
 
 // Alarm function handler
 void alarmHandler(int signal)
@@ -82,7 +83,6 @@ int llopen(LinkLayer connectionParameters)
 		printf("Error in the connection\n");
 		return -1;
 	}
-	int bytes;
 	int count = 0;
 	unsigned char buf[BUF_SIZE] = {0};
 	switch(connectionParameters.role){
@@ -90,8 +90,12 @@ int llopen(LinkLayer connectionParameters)
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);			
 			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
-				while(bytes = read(fd, buf, 1) > 0 && count < 5){
+				while(read(fd, buf, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(buf[0], count, 0x01, 0x07);     
+				}
+				if (count == 5){
+					alarm(0);
+					alarmEnabled = 1;
 				}
 				/*bytes = read(fd, buf, BUF_SIZE);
 				if (bytes == 5 && buf[1] ^ buf[2] == buf[3] && buf[0] == 0x7E && buf[4] == buf[0] && buf[1] == 0x01 && buf[2] == 0x07){
@@ -185,8 +189,7 @@ int setconnection(char *serialPort, LinkLayerRole role){
         return -1;
     }
 
-    printf("New termios structure set\n");
-	return fd;
+	return 1;
 }
 
 
@@ -230,8 +233,26 @@ int createFrame(char *buf, int bufSize, char *new_buff){
 	return c;
 }
 
-int checkSframeR(char c, int count, char R){ 
-	R = R ^ 0x80;
+typedef enum{ack, rej}feedback;
+
+int checkSframeR(char c, int count, feedback feed){ 
+	char R;
+	switch(feed){
+		case ack:
+			if (frame_num_t == 0x40)
+				R = 0x05;
+			else
+				R = 0x85;
+			break;
+		case rej:
+			if (frame_num_t == 0x40)
+				R = 0x81;
+			else
+				R = 0x01;
+			break;
+		default 
+		return 0;
+	}
 	switch(count){
 		case 0:
 			if(c == 0x7E)
@@ -265,6 +286,8 @@ int checkSframeR(char c, int count, char R){
 	}
 }
 
+
+
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
@@ -273,15 +296,17 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 	char *new_buf = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
 	int n_bytes = createFrame(buf, bufSize, new_buff);
 	alarmCount = 0;
-	(void)signal(SIGALRM, alarmHandler);
-	int confirmed = FALSE;	
+	(void)signal(SIGALRM, alarmHandler);	
 	int countRR = 0, countRJ = 0;
-	while(alarmCount < parameters.nRetrasmissions && !confirmed){
-		// to be modified: check answer
-		while(bytes = read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
-			countRR = checkSframeR(buf[0], countRR, 0x05);  
-			if ((countRJ = checkSframeR(buf[0], countRJ, 0x01)) == 5)
+	while(alarmCount < parameters.nRetrasmissions && countRR < 5){
+		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
+			countRR = checkSframeR(buf[0], countRR, ack);  
+			if ((countRJ = checkSframeR(buf[0], countRJ, rej)) == 5)
 				alarmEnabled = FALSE; // we have to check how to deal with the counter of the retransmissions		
+		}
+		if (countRR == 5){
+					alarm(0);
+					alarmEnabled = 1;
 		}
 		if (alarmEnabled == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
@@ -295,13 +320,13 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 	}
 	sleep(1);
 	// to be modified: check answer
-	while(count < 5 && bytes = read(fd, buf, 1) > 0){ // maybe to be thrown away
-			count = checkSframeR(buf[0], count);     
+	while(countRR < 5 read(fd, buf, 1) > 0){ // maybe to be thrown away
+			countRR = checkSframeR(buf[0], countRR, ack);
+			if (count == 0) 
+				return -1;
 		}
-	if (count != 5)
-		return -1;
 	
-    return 0;
+    return n_bytes;
 }
 
 ////////////////////////////////////////////////
@@ -309,7 +334,7 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO
+    
 
     return 0;
 }
