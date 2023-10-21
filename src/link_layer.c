@@ -112,7 +112,7 @@ int llopen(LinkLayer connectionParameters)
 			
 			}
 			sleep(1);
-			while(count < 5 && bytes = read(fd, buf, 1) > 0){
+			while(count < 5 && bytes = read(fd, buf, 1) > 0){ // we can put something like another timer here
 					count = checkbyte(buf[0], count);     
 				}
 			if (count != 5)
@@ -230,6 +230,41 @@ int createFrame(char *buf, int bufSize, char *new_buff){
 	return c;
 }
 
+int checkSframeR(char c, int count, char R){ 
+	R = R ^ 0x80;
+	switch(count){
+		case 0:
+			if(c == 0x7E)
+				return 1;
+			else 
+				return 0;
+		case 1:
+			if (c == 0x01)
+				return 2;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 2:
+			if (c == R)
+				return 3;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 3:
+			if (c == R ^ 0x01)
+				return 4;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 4:
+			if (c == 0x7E)
+				return 5;
+			else return 0;
+		default:
+			return 0;				
+	}
+}
+
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
@@ -240,12 +275,15 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 	alarmCount = 0;
 	(void)signal(SIGALRM, alarmHandler);
 	int confirmed = FALSE;	
+	int countRR = 0, countRJ = 0;
 	while(alarmCount < parameters.nRetrasmissions && !confirmed){
 		// to be modified: check answer
-		while(bytes = read(fd, buf, 1) > 0 && count < 5){
-			count = checkbyte(buf[0], count);     
+		while(bytes = read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
+			countRR = checkSframeR(buf[0], countRR, 0x05);  
+			if ((countRJ = checkSframeR(buf[0], countRJ, 0x01)) == 5)
+				alarmEnabled = FALSE; // we have to check how to deal with the counter of the retransmissions		
 		}
-		if (alarmEnabled == FALSE && count < 5){
+		if (alarmEnabled == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
 			// Wait until all bytes have been written to the serial port
 			sleep(1); // NOT SURE YET
@@ -257,8 +295,8 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 	}
 	sleep(1);
 	// to be modified: check answer
-	while(count < 5 && bytes = read(fd, buf, 1) > 0){
-			count = checkbyte(buf[0], count);     
+	while(count < 5 && bytes = read(fd, buf, 1) > 0){ // maybe to be thrown away
+			count = checkSframeR(buf[0], count);     
 		}
 	if (count != 5)
 		return -1;
