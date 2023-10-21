@@ -117,7 +117,7 @@ int llopen(LinkLayer connectionParameters)
 			}
 			sleep(1);
 			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkbyte(byte, count);     
+					count = checkSframe(byte, count, 0x01, 0x07);    
 				}
 			if (count != 5)
 				return -1;
@@ -333,7 +333,9 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 // LLREAD
 ////////////////////////////////////////////////
 
-int waitHeader(char c, int count){
+typedef enum {current, past, disc}state;
+
+int waitHeader(char c, int count, state *s){
 	switch(count){
 		case 0:
 			if(c == 0x7E)
@@ -348,21 +350,39 @@ int waitHeader(char c, int count){
 			else return 0;
 		case 2:
 			if (c == frame_num_r)
+			{
+				*s = actual;
 				return 3;
+			}	
 			else if (c == 0x7E)
 				return 1;
 			else if (c == frame_num_r ^ 0x40){
+				*s = past;
+				return 3;
+			}
+			else if (c == 0x0B){
+				*s = disc;
+				return 3;
+			}
+			else return 0;
+		case 3:
+			if (c == 0x03 ^ frame_num_r && (*s == actual))
+				return 4;
+			else if (c == 0x03 ^ frame_num_r ^ 0x40 && (*s == past)){
 				sendAck(c);
 				return 0;
 			}
-			
-			else return 0;
-		case 3:
-			if (c == 0x03 ^ frame_num_r)
-				return 4;
-			else if (c == 0x7E)
+			else if (c == 0x03 ^ 0x0B && (*s == disc)){
+				return -1;
+			}
+			else if (c == 0x7E){
+				*past = 0;
 				return 1;
-			else return 0;
+			}
+			else {
+				*past = 0;
+				return 0;
+			}
 		default:
 			return 0;				
 	}
@@ -384,15 +404,33 @@ void sendAck(char c){
 	
 }
 
+void sendNack(){
+	char ack;
+	switch(c){
+		case 0x00:
+			ack = 0x01;
+			break;
+		case 0x40:
+			ack = 0x81;
+			break;
+		default:
+			return;
+	}
+	sendSFrame(0x01, c);
+}
+
 int llread(unsigned char *packet)
 {
     // to wait the header
 	int count = 0;
 	char byte;
-	while (count < 4){
+	state s;
+	while (count < 4 && count != -1){
 		if (read(fd, &byte, 1) > 0)
-			count = waitHeader(byte, count);
+			count = waitHeader(byte, count, &s);
 	}
+	if (count == -1) 
+		return 0;
 	int count_bytes = 0, end = 0, esc = 0;
 	char bcc = 0x00; 	
 	while(!end && count_bytes < MAX_PAYLOAD){
@@ -408,7 +446,7 @@ int llread(unsigned char *packet)
 						bcc = bcc ^ 0x7D;
 						break;
 					default:
-						ERRORE ASK FOR RETRASMISSION
+						sendNack();
 						return -1;
 				}
 				esc = 0;
@@ -423,7 +461,7 @@ int llread(unsigned char *packet)
 		}
 	}
 	if (!end || bcc != packet[count_bytes - 1]){
-		ERRORE ASK FOR RETRANSMISSION
+		sendNack();
 		return -1;
 	}
 	sendAck(frame_num_r);
@@ -435,18 +473,104 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 // LLCLOSE
 ////////////////////////////////////////////////
-int llclose(int showStatistics)
-{
-    // TODO
-	
-    // Restore the old port settings
-    /*if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
-    {
-        perror("tcsetattr");
-        return -1;
-    }*/
 
-    if(close(fd) < 0)
-		return -1;
-	return 1;
+void alarmHandler_t(int signal)
+{
+    alarmEnabled_t = FALSE;
+    alarmCount_t++;
+}
+void alarmHandler_r(int signal)
+{
+    alarmEnabled_r = FALSE;
+    alarmCount_r++;
+}
+
+int alarmCount_t = 0;
+int alarmEnabled_t = FALSE;
+
+int alarmCount_r = 0;
+int alarmEnabled_r = FALSE;
+
+int llclose(int showStatistics, LinkLayerRole role)
+{	
+	char byte;
+	int count;
+	switch(role){
+		case LlTx:
+			
+			(void)signal(SIGALRM, alarmHandler_t);
+			while(alarmCount_t < parameters.nRetrasmissions && count < 5){
+				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
+					count = checkSframe(byte, count, 0x01, 0x0B);     
+				}
+				if (count == 5){
+					alarm(0);
+					alarmEnabled_t = 1;
+				}
+				if (alarmEnabled_t == FALSE && count < 5){
+					sendSFrame(fd, 0x03, 0x0B);
+
+					// Wait until all bytes have been written to the serial port
+					sleep(1); // NOT SURE YET
+					alarm(parameters.timeout);
+					alarmEnabled_t = TRUE;					
+				}			
+			}
+			sleep(1);
+			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
+					count = checkSframe(byte, count, 0x01, 0x0B);     
+				}
+			if (count != 5)
+				return -1;
+			
+			sendSFrame(fd, 0x03, 0x07);
+			
+			if (tcsetattr(fd, TCSANOW, &oldtio_t) == -1)
+			{
+				perror("tcsetattr");
+				return -1;
+			}
+			break;
+		
+		case LlRx:
+			(void)signal(SIGALRM, alarmHandler_r);
+			while(alarmCount_r < parameters.nRetrasmissions && count < 5){
+				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled_r){
+					count = checkSframe(byte, count, 0x03, 0x07);     
+				}
+				if (count == 5){
+					alarm(0);
+					alarmEnabled_r = 1;
+				}
+				if (alarmEnabled_r == FALSE && count < 5){
+					sendSFrame(fd, 0x01, 0x0B);
+
+					// Wait until all bytes have been written to the serial port
+					sleep(1); // NOT SURE YET
+					alarm(parameters.timeout);
+					alarmEnabled_r = TRUE;
+					
+				}
+			
+			}
+			/*sleep(1);
+			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
+					count = checkSframe(byte, count, 0x03, 0x07);      
+				}
+			if (count != 5)
+				return -1;*/
+			
+			/*if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+			{
+				perror("tcsetattr");
+				return -1;
+			}*/
+			break;
+		
+		default:
+			return -1;
+
+	}
+	
+    return close(fd);
 }
