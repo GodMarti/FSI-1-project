@@ -15,7 +15,7 @@ struct termios oldtio_r;*/
 int alarmEnabled = FALSE;
 int alarmCount = 0;
 volatile int STOP = FALSE;
-unsigned char frame_num_t = 0x00;
+unsigned char frame_num_t = 0x40;
 unsigned char frame_num_r = 0x40;
 LinkLayer parameters;
 int fd;
@@ -84,14 +84,14 @@ int llopen(LinkLayer connectionParameters)
 		return -1;
 	}
 	int count = 0;
-	unsigned char buf[BUF_SIZE] = {0};
+	unsigned char byte;
 	switch(connectionParameters.role){
 		
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);			
 			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
-				while(read(fd, buf, 1) > 0 && count < 5 && alarmEnabled){
-					count = checkSframe(buf[0], count, 0x01, 0x07);     
+				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
+					count = checkSframe(byte, count, 0x01, 0x07);     
 				}
 				if (count == 5){
 					alarm(0);
@@ -116,8 +116,8 @@ int llopen(LinkLayer connectionParameters)
 			
 			}
 			sleep(1);
-			while(count < 5 && bytes = read(fd, buf, 1) > 0){ // we can put something like another timer here
-					count = checkbyte(buf[0], count);     
+			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
+					count = checkbyte(byte, count);     
 				}
 			if (count != 5)
 				return -1;
@@ -291,7 +291,7 @@ int checkSframeR(char c, int count, feedback feed){
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked the teacher if we can
+int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAYLOAD thing
 {
 	char *new_buf = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
 	int n_bytes = createFrame(buf, bufSize, new_buff);
@@ -319,7 +319,7 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 	
 	}
 	sleep(1);
-	// to be modified: check answer
+	
 	while(countRR < 5 read(fd, buf, 1) > 0){ // maybe to be thrown away
 			countRR = checkSframeR(buf[0], countRR, ack);
 			if (count == 0) 
@@ -332,11 +332,86 @@ int llwrite(const unsigned char *buf, int bufSize) // we should add fd, I asked 
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
+
+int waitHeader(char c, int count){
+	switch(count){
+		case 0:
+			if(c == 0x7E)
+				return 1;
+			else 
+				return 0;
+		case 1:
+			if (c == 0x03)
+				return 2;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		case 2:
+			if (c == frame_num_r)
+				return 3;
+			else if (c == 0x7E)
+				return 1;
+			else if (c == frame_num_r ^ 0x40){
+				MANDA ACK
+				return 0;
+			}
+			
+			else return 0;
+		case 3:
+			if (c == 0x03 ^ frame_num_r)
+				return 4;
+			else if (c == 0x7E)
+				return 1;
+			else return 0;
+		default:
+			return 0;				
+	}
+}
 int llread(unsigned char *packet)
 {
-    
+    // to wait the header
+	int count = 0;
+	char byte;
+	while (count < 4){
+		if (read(fd, &byte, 1) > 0)
+			count = waitHeader(byte, count);
+	}
+	int count_bytes = 0, end = 0, esc = 0;
+	char bcc = 0x00; 	
+	while(!end && count_bytes < MAX_PAYLOAD){
+		if (read(fd, &byte, 1) > 0){
+			if (esc){
+				switch(byte){
+					case 0x5E;
+						packet[count_bytes++] = 0x7E;
+						bcc = bcc ^ 0x7E;
+						break;
+					case 0x5D:
+						packet[count_bytes++] = 0x7D;
+						bcc = bcc ^ 0x7D;
+						break;
+					default:
+						ERRORE ASK FOR RETRASMISSION
+						return -1;
+				}
+				esc = 0;
+			}
+			else if (byte == 0x7D){
+				end = 1;
+			}
+			else{
+				packet[count_bytes ++] = byte;
+				bcc = bcc ^ byte;
+			}
+		}
+	}
+	if (!end || bcc != packet[count_bytes - 1]){
+		ERRORE ASK FOR RETRANSMISSION
+		return -1;
+	}
+	SEND ACK
 
-    return 0;
+    return n_bytes;
 }
 
 ////////////////////////////////////////////////
