@@ -9,8 +9,8 @@
 // LLOPEN
 ////////////////////////////////////////////////
 #define BUF_SIZE 256 // NOT SURE YET
-/*struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
-struct termios oldtio_r;*/
+struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
+struct termios oldtio_r;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
