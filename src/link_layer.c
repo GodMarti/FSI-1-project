@@ -560,11 +560,11 @@ int llclose(int showStatistics, LinkLayerRole role)
 			if (count != 5)
 				return -1;*/
 			
-			/*if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+			if (tcsetattr(fd, TCSANOW, &oldtio_r) == -1)
 			{
 				perror("tcsetattr");
 				return -1;
-			}*/
+			}
 			break;
 		
 		default:
