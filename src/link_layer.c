@@ -97,38 +97,6 @@ int checkbyte(char c, int count, LinkLayerRole role){
 		default:
 			return 0;
 	}
-	
-	switch(count){
-		case 0:
-			if(c == 0x7E)
-				return 1;
-			else 
-				return 0;
-		case 1:
-			if (c == 0x03)
-				return 2;
-			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 2:
-			if (c == 0x03)
-				return 3;
-			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 3:
-			if (c == 0x03 ^ 0x03)
-				return 4;
-			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 4:
-			if (c == 0x7E)
-				return 5;
-			else return 0;
-		default:
-			return 0;				
-	}
 }
 
 int llopen(LinkLayer connectionParameters)
