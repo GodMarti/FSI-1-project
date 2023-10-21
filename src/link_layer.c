@@ -9,7 +9,8 @@
 // LLOPEN
 ////////////////////////////////////////////////
 #define BUF_SIZE 256 // NOT SURE YET
-struct termios oldtio; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
+/*struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
+struct termios oldtio_r;*/
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
@@ -97,6 +98,26 @@ int checkbyte(char c, int count, LinkLayerRole role){
 		default:
 			return 0;
 	}
+	
+}
+
+int sendSFrame(int fd, LinkLayerRole role){
+	unsigned char buf[5];
+	switch(role){
+		case Lltx:
+			buf[1] = 0x03;
+			buf[2] = 0x03;
+			break;
+		case LlRx:
+			buf[1] = 0x01;
+			buf[2] = 0x07;
+			break;
+	}
+	buf[0] = 0x7E;
+	buf[3] = buf[1] ^ buf[2];
+	buf[4] = buf[0];
+
+	return write(fd, buf, 5);
 }
 
 int llopen(LinkLayer connectionParameters)
@@ -126,14 +147,7 @@ int llopen(LinkLayer connectionParameters)
 					alarmCount = 3;
 				}*/
 				if (alarmEnabled == FALSE && count < 5){
-					buf[0] = 0x7E;
-					buf[1] = 0x03;
-					buf[2] = 0x03;
-					buf[3] = buf[1] ^ buf[2];
-					buf[4] = buf[0];
-
-					bytes = write(fd, buf, BUF_SIZE);
-					printf("%d bytes written\n", bytes);
+					sendSFrame(fd, LlTx);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
@@ -157,13 +171,9 @@ int llopen(LinkLayer connectionParameters)
 					count = checkbyte(buf[0], count);      
 				//sleep(1);
 			}
-			printf("Correct\n");
-			buf[0] = 0x7E;
-			buf[1] = 0x01;
-			buf[2] = 0x07;
-			buf[3] = buf[1] ^ buf[2];
-			buf[4] = 0x7E;
-			if (bytes = write(fd, buf, 5) != 5)
+			
+			
+			if (sendSFrame(fd, LlRx) != 5)
 				return -1;
 		
 			break;
@@ -176,7 +186,7 @@ int llopen(LinkLayer connectionParameters)
     return fd;
 }
 
-int setconnection(char *serialPort){
+int setconnection(char *serialPort, LinkLayerRole role){
 	int fd = open(serialPort, O_RDWR | O_NOCTTY);
     if (fd < 0)
     {
@@ -186,11 +196,22 @@ int setconnection(char *serialPort){
 	/*struct termios oldtio;*/
     struct termios newtio;
 	// Save current port settings
-    if (tcgetattr(fd, &oldtio) == -1)
-    {
-        perror("tcgetattr");
-        return -1;
-    }
+	/*switch(role){
+		case LlTx:
+			if (tcgetattr(fd, &oldtio_t) == -1)
+			{
+				perror("tcgetattr");
+				return -1;
+			}
+			break;
+		case LlRx:
+			if (tcgetattr(fd, &oldtio_r) == -1)
+			{
+				perror("tcgetattr");
+				return -1;
+			}
+			break;
+	}*/
 
     // Clear struct for new port settings
     memset(&newtio, 0, sizeof(newtio));
@@ -242,11 +263,11 @@ int llclose(int showStatistics)
     // TODO
 	
     // Restore the old port settings
-    if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+    /*if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
     {
         perror("tcsetattr");
         return -1;
-    }
+    }*/
 
     if(close(fd) < 0)
 		return -1;
