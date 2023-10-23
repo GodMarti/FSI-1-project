@@ -66,35 +66,38 @@ int getSize(unsigned char *packet, int *bit){
 unsigned char* checkControlPacket(unsigned char *packet, int packetSize,int *fileSize){
 	int bit = 0,i;
 	if(packet[bit++] != 0x02)
-		// return some error
+		return NULL;
 	int n;
 	unsigned char* file_name; 
 	switch(packet[bit ++]){
 		case 0x00:
 			*fileSize = getSize(packet, &bit);
 			if (packet[bit ++] != 0x01)
-				// return some error
+				return NULL;
 			file_name = getName(packet, &bit);
 			break;
 		case 0x01:
 			file_name = getName(packet, &bit);
 			if (packet[bit ++] != 0x00)
-				// return some error
+				return NULL;
 			*fileSize = getSize(packet, &bit);
 			break;
 		default:
-			// return some error
+			return NULL;
 	}
-	// return some error if bit e packetSize aren't the same
+	if (bit != packetSize) // NOT SURE ABOUT IT
+		return NULL;
 	return file_name;
 }
 
-void checkDataPacket(packet, packetSize, buffer){
-	// we have to return an error if the first three are wrong?
+int checkDataPacket(packet, packetSize, buffer){
+	if (packet[0] != 0x01 || 256*packet[1] + packet[2] != packetSize) // we have to return an error if the first three are wrong? NOT SURE ABOUT IT
+		return 0;
 	int i;
 	for (i = 0; i < packetSize-3; i ++){
 		buffer[i] = packet[i + 3];
 	}
+	return 1;
 }
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate,
@@ -117,7 +120,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     }
 	switch (linkLayer.role) {
 
-        case LlTx: {
+        case LlTx: 
             
             FILE* file = fopen(filename, "rb");
             if (file == NULL) {
@@ -168,35 +171,61 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 printf("Exit: error in end packet\n");
                 exit(-1);
             }
-			free(cpStart); // don't know if we need to do it
+			free(cpStart); 
 			free(start_data);
             llclose(STAT, linkLayer.role);
             break;
-        }
+        
 
-        case LlRx: {
+        case LlRx: 
 
             unsigned char *packet = malloc(MAX_PAYLOAD_SIZE * sizeof(char));
             int packetSize = -1;
-            while ((packetSize = llread(fd, packet)) < 0);
+            while ((packetSize = llread(packet)) < 0);
+			if (packet[0] != 0x02){ // NOT SURE ABOUT IT
+				printf("Exit: error in start packet\n");
+				exit(-1);
+			}
             unsigned long int fileSize = 0;
             unsigned char* file_name = checkControlPacket(packet, packetSize, &fileSize); 
-
+			if (file_name == NULL){
+				printf("Exit: error in start packet\n");
+				exit(-1);
+			}
             FILE* file = fopen(file_name, "wb+");
-			free(name);
-			int stop = 0;
-            while (!stop) {    
-                while ((packetSize = llread(packet)) < 0);
-                if(packetSize == 0) 
-					stop = 1;
-                else if(packet[0] != 3){
+			if (file == NULL) {
+                perror("File not found\n");
+                exit(-1);
+            }
+            while (packet[0] != 3) {    
+                while ((packetSize = llread(packet)) <= 0);
+                /*if(packetSize == 0) 
+					stop = 1;*/
+                if(packet[0] != 3){
                     unsigned char *buffer = malloc((packetSize - 3) * sizeof(char));
-                    checkDataPacket(packet, packetSize, buffer); // all the controls still to do
-                    fwrite(buffer, sizeof(char), packetSize-3, file);
+                    if (checkDataPacket(packet, packetSize, buffer)) 
+						fwrite(buffer, sizeof(char), packetSize-3, file);
+					else{
+						printf("Exit: error in data packet\n");
+						exit(-1);
+					}
+                    
                     free(buffer);
                 }
+				else{
+					
+					unsigned long int fileSize_check = 0;
+					unsigned char* file_name_check = checkControlPacket(packet, packetSize, &fileSize_check);
+					if (fileSize_check != fileSize || strcmp(file_name, file_name_check) != 0){
+						printf("Exit: error in end packet\n");
+						exit(-1);
+					}
+					free(file_name_check);
+					
+				}
             }
-
+			free(file_name);
+			free(packet);
             fclose(file);
 			llclose(STAT, linkLayer.role);
             break;
@@ -204,7 +233,6 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         default:
             exit(-1);
             break;
-    }}
+    }
 }
 
-}
