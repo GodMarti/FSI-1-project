@@ -1,7 +1,12 @@
 // Application layer protocol implementation
 
 #include "application_layer.h"
-
+#include "link_layer.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 #define STAT 1
 
 unsigned char *getControlPacket(char first, char *filename, int fileSize, int *cp_size){
@@ -10,7 +15,7 @@ unsigned char *getControlPacket(char first, char *filename, int fileSize, int *c
 	packet[size++] = first;
 	packet[size++] = 0x00;
 	int n_bytes = 0;
-	unsigned char *size_bytes malloc(MAX_PAYLOAD_SIZE * sizeof(char));
+	unsigned char *size_bytes = malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 	while(fileSize > 0){
 		size_bytes[n_bytes++] = fileSize % 256;
 		fileSize = fileSize / 256;
@@ -57,7 +62,7 @@ unsigned char* getName(unsigned char *packet, int *bit){
 
 int getSize(unsigned char *packet, int *bit){
 	int dim = packet[(*bit)++];
-	size = 0;
+	int size = 0;
 	for (int i = 0; i < dim; i ++)
 		size = size*256 + packet[(*bit)++];
 	return size;
@@ -90,7 +95,7 @@ unsigned char* checkControlPacket(unsigned char *packet, int packetSize,int *fil
 	return file_name;
 }
 
-int checkDataPacket(packet, packetSize, buffer){
+int checkDataPacket(unsigned char *packet, int packetSize, unsigned char *buffer){
 	if (packet[0] != 0x01 || 256*packet[1] + packet[2] != packetSize) // we have to return an error if the first three are wrong? NOT SURE ABOUT IT
 		return 0;
 	int i;
@@ -156,7 +161,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 memcpy(data, content, data_size);*/
                 unsigned char* data_packet = getDataPacket(all_data, data_size);
                 all_data += data_size;
-                if(llwrite(data_packet, dpSize) == -1) { // maybe it's better != data_size + 3
+                if(llwrite(data_packet, data_size + 3) == -1) { // maybe it's better != data_size + 3
                     printf("Exit: error in data packets\n");
                     exit(-1);
                 }
