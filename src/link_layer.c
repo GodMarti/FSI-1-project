@@ -116,7 +116,7 @@ int llopen(LinkLayer connectionParameters)
 			
 			}
 			sleep(1);
-			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
+			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x01, 0x07);    
 				}
 			if (count != 5)
@@ -125,7 +125,7 @@ int llopen(LinkLayer connectionParameters)
 			
 		case LlRx:
 			while(count < 5){
-				if(bytes = read(fd, buf, BUF_SIZE) > 0)
+				if(read(fd, buf, BUF_SIZE) > 0)
 					count = checkSframe(buf[0], count, 0x03, 0x03);      
 				//sleep(1);
 			}
