@@ -63,7 +63,7 @@ int checkSframe(char c, int count, char A, char C){
 	}
 }
 
-int sendSFrame(int fd, char A, char C){
+int sendSFrame(char A, char C){
 	unsigned char buf[5];
 	buf[0] = 0x7E;
 	buf[1] = A;
@@ -77,7 +77,7 @@ int llopen(LinkLayer connectionParameters)
 {
 	parameters.timeout = connectionParameters.timeout;
 	parameters.nRetrasmissions = connectionParameters.nRetrasmissions;
-    int fd = setconnection(connectionParameters.serialPort);
+    int fd = setconnection(connectionParameters.serialPort, connectionParameters.role);
 	if (fd < 0) 
 	{
 		printf("Error in the connection\n");
@@ -105,7 +105,7 @@ int llopen(LinkLayer connectionParameters)
 					alarmCount = 3;
 				}*/
 				if (alarmEnabled == FALSE && count < 5){
-					sendSFrame(fd, 0x03, 0x03);
+					sendSFrame(0x03, 0x03);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
@@ -131,7 +131,7 @@ int llopen(LinkLayer connectionParameters)
 			}
 			
 			
-			if (sendSFrame(fd, 0x01, 0x07) != 5)
+			if (sendSFrame(0x01, 0x07) != 5)
 				return -1;
 		
 			break;
@@ -145,16 +145,16 @@ int llopen(LinkLayer connectionParameters)
 }
 
 int setconnection(char *serialPort, LinkLayerRole role){
-	int fd = open(serialPort, O_RDWR | O_NOCTTY);
+	fd = open(serialPort, O_RDWR | O_NOCTTY);
     if (fd < 0)
     {
-        perror(serialPortName);
+        perror(serialPort);
         exit(-1);
     }
 	/*struct termios oldtio;*/
     struct termios newtio;
 	// Save current port settings
-	/*switch(role){
+	switch(role){
 		case LlTx:
 			if (tcgetattr(fd, &oldtio_t) == -1)
 			{
@@ -169,7 +169,7 @@ int setconnection(char *serialPort, LinkLayerRole role){
 				return -1;
 			}
 			break;
-	}*/
+	}
 
     // Clear struct for new port settings
     memset(&newtio, 0, sizeof(newtio));
@@ -198,7 +198,7 @@ int createFrame(char *buf, int bufSize, char *new_buff){
 	int i;
 	// to create the bcc
 	for (i = 0; i < bufSize; i ++)
-		ecc = bcc ^ buf[i];
+		bcc = bcc ^ buf[i];
 	int c = 4;
 	// add FH 
 	new_buff[0] = 0x7E;
@@ -335,6 +335,37 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 
 typedef enum {current, past, disc}state;
 
+void sendAck(char c){
+	char ack;
+	switch(c){
+		case 0x00:
+			ack = 0x85;
+			break;
+		case 0x40:
+			ack = 0x05;
+			break;
+		default:
+			return;
+	}
+	sendSFrame(0x01, ack);
+	
+}
+
+void sendNack(){
+	char ack;
+	switch(c){
+		case 0x00:
+			ack = 0x01;
+			break;
+		case 0x40:
+			ack = 0x81;
+			break;
+		default:
+			return;
+	}
+	sendSFrame(0x01, ack);
+}
+
 int waitHeader(char c, int count, state *s){
 	switch(count){
 		case 0:
@@ -388,36 +419,7 @@ int waitHeader(char c, int count, state *s){
 	}
 }
 
-void sendAck(char c){
-	char ack;
-	switch(c){
-		case 0x00:
-			ack = 0x85;
-			break;
-		case 0x40:
-			ack = 0x05;
-			break;
-		default:
-			return;
-	}
-	sendSFrame(0x01, c);
-	
-}
 
-void sendNack(){
-	char ack;
-	switch(c){
-		case 0x00:
-			ack = 0x01;
-			break;
-		case 0x40:
-			ack = 0x81;
-			break;
-		default:
-			return;
-	}
-	sendSFrame(0x01, c);
-}
 
 int llread(unsigned char *packet)
 {
@@ -433,7 +435,7 @@ int llread(unsigned char *packet)
 		return 0;
 	int count_bytes = 0, end = 0, esc = 0;
 	char bcc = 0x00; 	
-	while(!end && count_bytes < MAX_PAYLOAD){
+	while(!end && count_bytes < MAX_PAYLOAD_SIZE){
 		if (read(fd, &byte, 1) > 0){
 			if (esc){
 				switch(byte){
@@ -467,7 +469,7 @@ int llread(unsigned char *packet)
 	sendAck(frame_num_r);
 	frame_num_r = frame_num_r ^ 0x40;
 
-    return n_bytes;
+    return count_bytes;
 }
 
 ////////////////////////////////////////////////
@@ -511,7 +513,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 					alarmEnabled_t = 1;
 				}
 				if (alarmEnabled_t == FALSE && count < 5){
-					sendSFrame(fd, 0x03, 0x0B);
+					sendSFrame(0x03, 0x0B);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
@@ -520,13 +522,13 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}			
 			}
 			sleep(1);
-			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
+			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x01, 0x0B);     
 				}
 			if (count != 5)
 				return -1;
 			
-			sendSFrame(fd, 0x03, 0x07);
+			sendSFrame(0x03, 0x07);
 			
 			if (tcsetattr(fd, TCSANOW, &oldtio_t) == -1)
 			{
@@ -546,7 +548,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 					alarmEnabled_r = 1;
 				}
 				if (alarmEnabled_r == FALSE && count < 5){
-					sendSFrame(fd, 0x01, 0x0B);
+					sendSFrame(0x01, 0x0B);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
