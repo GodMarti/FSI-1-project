@@ -325,7 +325,7 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 			if (count == 0) 
 				return -1;
 		}
-	
+	free(new_buff);
     return n_bytes;
 }
 
@@ -474,6 +474,14 @@ int llread(unsigned char *packet)
 // LLCLOSE
 ////////////////////////////////////////////////
 
+
+
+int alarmCount_t = 0;
+int alarmEnabled_t = FALSE;
+
+int alarmCount_r = 0;
+int alarmEnabled_r = FALSE;
+
 void alarmHandler_t(int signal)
 {
     alarmEnabled_t = FALSE;
@@ -485,11 +493,6 @@ void alarmHandler_r(int signal)
     alarmCount_r++;
 }
 
-int alarmCount_t = 0;
-int alarmEnabled_t = FALSE;
-
-int alarmCount_r = 0;
-int alarmEnabled_r = FALSE;
 
 int llclose(int showStatistics, LinkLayerRole role)
 {	
