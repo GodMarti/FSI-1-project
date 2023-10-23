@@ -1,7 +1,12 @@
 // Link layer protocol implementation
 
 #include "link_layer.h"
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <time.h>
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -9,8 +14,13 @@
 // LLOPEN
 ////////////////////////////////////////////////
 #define BUF_SIZE 256 // NOT SURE YET
+#define prob_err 0.0001
+#define DELAY 1
 struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
 struct termios oldtio_r;
+int tot_frames = 0;
+int good_frames = 0;
+int bit_received = 0;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
@@ -90,6 +100,7 @@ int llopen(LinkLayer connectionParameters)
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);			
 			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
+				usleep(DELAY); // NOT SURE
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x07);     
 				}
@@ -106,16 +117,17 @@ int llopen(LinkLayer connectionParameters)
 				}*/
 				if (alarmEnabled == FALSE && count < 5){
 					sendSFrame(0x03, 0x03);
-
+					
 					// Wait until all bytes have been written to the serial port
-					sleep(1); // NOT SURE YET
+					/*sleep(1);*/ // NOT SURE YET
 					alarm(connectionParameters.timeout);
 					alarmEnabled = TRUE;
 					
 				}
 			
 			}
-			sleep(1);
+			/*sleep(1);*/
+			usleep(DELAY); // NOT SURE YET
 			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x01, 0x07);    
 				}
@@ -124,6 +136,7 @@ int llopen(LinkLayer connectionParameters)
 			break;
 			
 		case LlRx:
+			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
 				if(read(fd, buf, BUF_SIZE) > 0)
 					count = checkSframe(buf[0], count, 0x03, 0x03);      
@@ -141,7 +154,7 @@ int llopen(LinkLayer connectionParameters)
 	}
 	
 
-    return fd;
+    return 1;
 }
 
 int setconnection(char *serialPort, LinkLayerRole role){
@@ -299,6 +312,7 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 	(void)signal(SIGALRM, alarmHandler);	
 	int countRR = 0, countRJ = 0;
 	while(alarmCount < parameters.nRetrasmissions && countRR < 5){
+		usleep(DELAY); // NOT SURE YET
 		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
 			countRR = checkSframeR(buf[0], countRR, ack);  
 			if ((countRJ = checkSframeR(buf[0], countRJ, rej)) == 5)
@@ -310,6 +324,7 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 		}
 		if (alarmEnabled == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
+			tot_frames ++;
 			// Wait until all bytes have been written to the serial port
 			sleep(1); // NOT SURE YET
 			alarm(parameters.timeout);
@@ -318,8 +333,8 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 		}
 	
 	}
-	sleep(1);
-	
+	//sleep(1);
+	usleep(DELAY); // NOT SURE YET
 	while(countRR < 5 read(fd, buf, 1) > 0){ // maybe to be thrown away
 			countRR = checkSframeR(buf[0], countRR, ack);
 			if (count == 0) 
@@ -427,6 +442,7 @@ int llread(unsigned char *packet)
 	int count = 0;
 	char byte;
 	state s;
+	usleep(DELAY); // NOT SURE YET
 	while (count < 4 && count != -1){
 		if (read(fd, &byte, 1) > 0)
 			count = waitHeader(byte, count, &s);
@@ -462,11 +478,13 @@ int llread(unsigned char *packet)
 			}
 		}
 	}
-	if (!end || bcc != packet[count_bytes - 1]){
+	srand(time(NULL));
+	if (!end || bcc != packet[count_bytes - 1] || (double)rand() / RAND_MAX < prob_err){
 		sendNack();
 		return -1;
 	}
 	sendAck(frame_num_r);
+	good_frames++;
 	frame_num_r = frame_num_r ^ 0x40;
 
     return count_bytes;
@@ -505,6 +523,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 			
 			(void)signal(SIGALRM, alarmHandler_t);
 			while(alarmCount_t < parameters.nRetrasmissions && count < 5){
+				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x0B);     
 				}
@@ -521,7 +540,8 @@ int llclose(int showStatistics, LinkLayerRole role)
 					alarmEnabled_t = TRUE;					
 				}			
 			}
-			sleep(1);
+			//sleep(1);
+			usleep(DELAY); // NOT SURE YET
 			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x01, 0x0B);     
 				}
@@ -539,7 +559,9 @@ int llclose(int showStatistics, LinkLayerRole role)
 		
 		case LlRx:
 			(void)signal(SIGALRM, alarmHandler_r);
+			
 			while(alarmCount_r < parameters.nRetrasmissions && count < 5){
+				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled_r){
 					count = checkSframe(byte, count, 0x03, 0x07);     
 				}
@@ -576,6 +598,9 @@ int llclose(int showStatistics, LinkLayerRole role)
 			return -1;
 
 	}
-	
+	if(showStatistics){
+		float FER = 1.00 - (float) good_frames / (float) tot_frames;
+		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d", FER, DELAY, MAX_PAYLOAD_SIZE);
+	}
     return close(fd);
 }
