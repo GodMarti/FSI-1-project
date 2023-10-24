@@ -127,6 +127,7 @@ int setconnection(char *serialPort, LinkLayerRole role){
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
     newtio.c_cc[VMIN] = 0;  // Read what is on the buffer right now, without waiting
+	tcflush(fd, TCIOFLUSH);
 	// Set new port settings
     if (tcsetattr(fd, TCSANOW, &newtio) == -1)
     {
@@ -149,17 +150,24 @@ int llopen(LinkLayer connectionParameters)
 		printf("Error in the connection\n");
 		return -1;
 	}
+	else{
+		printf("Connection ok\n");
+	}
 	int count = 0;
 	unsigned char byte;
 	switch(connectionParameters.role){
 		
 		case LlTx:
-			(void)signal(SIGALRM, alarmHandler);			
+			(void)signal(SIGALRM, alarmHandler);
+			printf("Pronto a iniziare a mandare\n");
 			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
-				usleep(DELAY); // NOT SURE
+				printf("Sono nel while\n");
+				/*usleep(DELAY); // NOT SURE*/
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
+					printf("Entro nel while dove non devo entrare\n");
 					count = checkSframe(byte, count, 0x01, 0x07);     
 				}
+				printf("Non ho letto nulla\n");
 				if (count == 5){
 					alarm(0);
 					alarmEnabled = 1;
@@ -172,20 +180,26 @@ int llopen(LinkLayer connectionParameters)
 					alarmCount = 3;
 				}*/
 				if (alarmEnabled == FALSE && count < 5){
-					sendSFrame(0x03, 0x03);
-					
-					// Wait until all bytes have been written to the serial port
-					/*sleep(1);*/ // NOT SURE YET
-					alarm(connectionParameters.timeout);
-					alarmEnabled = TRUE;
+					printf("Provo a inviare il frame\n");
+					if (sendSFrame(0x03, 0x03) != 5){
+						printf("Errore: Frame per connettere non inviato\n");
+					}
+					else{
+						// Wait until all bytes have been written to the serial port
+						/*sleep(1);*/ // NOT SURE YET
+						alarm(connectionParameters.timeout);
+						alarmEnabled = TRUE;
+						printf("Frame per connettere inviato\n");
+					}
 					
 				}
+				
 			
 			}
 			/*sleep(1);*/
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkSframe(byte, count, 0x01, 0x07);    
+					count = checkSframe(byte, count, 0x01, 0x07); 
 				}
 			if (count != 5)
 				return -1;
@@ -195,7 +209,9 @@ int llopen(LinkLayer connectionParameters)
 			start_time = clock();
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
+				printf("Aspetto byte\n");
 				if(read(fd, &byte, 1) > 0){
+					printf("%c ricevuto\n", byte);
 					count = checkSframe(byte, count, 0x03, 0x03);
 					byte_received++;
 				}
@@ -212,7 +228,7 @@ int llopen(LinkLayer connectionParameters)
 			return -1;
 	}
 	
-
+	printf("Open phase terminated correctly\n");
     return 1;
 }
 
@@ -315,31 +331,41 @@ int checkSframeR(char c, int count, feedback feed){
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
+
+int alarmEnabled_w = FALSE;
+int alarmCount_w = 0;
+void alarmHandler_w(int signal)
+{
+    alarmEnabled_w = FALSE;
+    alarmCount_w++;
+}
+
 int llwrite(unsigned char *buf, int bufSize) // We have to add the MAX_PAYLOAD thing
 {
 	unsigned char *new_buff = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
 	int n_bytes = createFrame(buf, bufSize, new_buff);
-	alarmCount = 0;
-	(void)signal(SIGALRM, alarmHandler);	
+	alarmCount_w = 0;
+	alarmEnabled_w = FALSE;
+	(void)signal(SIGALRM, alarmHandler_w);	
 	int countRR = 0, countRJ = 0;
-	while(alarmCount < parameters.nRetransmissions && countRR < 5){
+	while(alarmCount_w < parameters.nRetransmissions && countRR < 5){
 		usleep(DELAY); // NOT SURE YET
-		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
+		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled_w){
 			countRR = checkSframeR(buf[0], countRR, ack);  
 			if ((countRJ = checkSframeR(buf[0], countRJ, rej)) == 5)
-				alarmEnabled = FALSE; // we have to check how to deal with the counter of the retransmissions		
+				alarmEnabled_w = FALSE; // we have to check how to deal with the counter of the retransmissions		
 		}
 		if (countRR == 5){
 					alarm(0);
-					alarmEnabled = 1;
+					alarmEnabled_w = 1;
 		}
-		if (alarmEnabled == FALSE && countRR < 5){
+		if (alarmEnabled_w == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
 			tot_frames ++;
 			// Wait until all bytes have been written to the serial port
-			sleep(1); // NOT SURE YET
+			/*sleep(1); // NOT SURE YET*/
 			alarm(parameters.timeout);
-			alarmEnabled = TRUE;
+			alarmEnabled_w = TRUE;
 			
 		}
 	
