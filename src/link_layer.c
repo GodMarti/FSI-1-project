@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <signal.h>
+#include <termios.h>
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -16,6 +18,7 @@
 #define BUF_SIZE 256 // NOT SURE YET
 #define prob_err 0.0001
 #define DELAY 1
+int BAUDRATE;
 struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
 struct termios oldtio_r;
 int tot_frames = 0;
@@ -84,11 +87,60 @@ int sendSFrame(char A, char C){
 	return write(fd, buf, 5);
 }
 
+int setconnection(char *serialPort, LinkLayerRole role){
+	fd = open(serialPort, O_RDWR | O_NOCTTY);
+    if (fd < 0)
+    {
+        perror(serialPort);
+        exit(-1);
+    }
+	/*struct termios oldtio;*/
+    struct termios newtio;
+	// Save current port settings
+	switch(role){
+		case LlTx:
+			if (tcgetattr(fd, &oldtio_t) == -1)
+			{
+				perror("tcgetattr");
+				return -1;
+			}
+			break;
+		case LlRx:
+			if (tcgetattr(fd, &oldtio_r) == -1)
+			{
+				perror("tcgetattr");
+				return -1;
+			}
+			break;
+	}
+
+    // Clear struct for new port settings
+    memset(&newtio, 0, sizeof(newtio));
+
+    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNPAR;
+    newtio.c_oflag = 0;
+
+    // Set input mode (non-canonical, no echo,...)
+    newtio.c_lflag = 0;
+    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
+    newtio.c_cc[VMIN] = 0;  // Read what is on the buffer right now, without waiting
+	// Set new port settings
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
+    {
+        perror("tcsetattr");
+        return -1;
+    }
+
+	return 1;
+}
+
 int llopen(LinkLayer connectionParameters)
 {
 	parameters.timeout = connectionParameters.timeout;
-	parameters.nRetrasmissions = connectionParameters.nRetrasmissions;
+	parameters.nRetransmissions = connectionParameters.nRetransmissions;
 	parameters.baudRate = connectionParameters.baudRate;
+	BAUDRATE = connectionParameters.baudRate;
     int fd = setconnection(connectionParameters.serialPort, connectionParameters.role);
 	if (fd < 0) 
 	{
@@ -101,7 +153,7 @@ int llopen(LinkLayer connectionParameters)
 		
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);			
-			while(alarmCount < connectionParameters.nRetrasmissions && count < 5){
+			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
 				usleep(DELAY); // NOT SURE
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x07);     
@@ -159,54 +211,6 @@ int llopen(LinkLayer connectionParameters)
 	
 
     return 1;
-}
-
-int setconnection(char *serialPort, LinkLayerRole role){
-	fd = open(serialPort, O_RDWR | O_NOCTTY);
-    if (fd < 0)
-    {
-        perror(serialPort);
-        exit(-1);
-    }
-	/*struct termios oldtio;*/
-    struct termios newtio;
-	// Save current port settings
-	switch(role){
-		case LlTx:
-			if (tcgetattr(fd, &oldtio_t) == -1)
-			{
-				perror("tcgetattr");
-				return -1;
-			}
-			break;
-		case LlRx:
-			if (tcgetattr(fd, &oldtio_r) == -1)
-			{
-				perror("tcgetattr");
-				return -1;
-			}
-			break;
-	}
-
-    // Clear struct for new port settings
-    memset(&newtio, 0, sizeof(newtio));
-
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
-
-    // Set input mode (non-canonical, no echo,...)
-    newtio.c_lflag = 0;
-    newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 0;  // Read what is on the buffer right now, without waiting
-	// Set new port settings
-    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
-    {
-        perror("tcsetattr");
-        return -1;
-    }
-
-	return 1;
 }
 
 
