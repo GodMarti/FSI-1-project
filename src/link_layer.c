@@ -18,6 +18,8 @@
 #define BUF_SIZE 256 // NOT SURE YET
 #define prob_err 0.0001
 #define DELAY 1
+clock_t start_time;
+clock_t end_time;
 int BAUDRATE;
 struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
 struct termios oldtio_r;
@@ -190,10 +192,11 @@ int llopen(LinkLayer connectionParameters)
 			break;
 			
 		case LlRx:
+			start_time = clock();
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
-				if(read(fd, buf, BUF_SIZE) > 0){
-					count = checkSframe(buf[0], count, 0x03, 0x03);
+				if(read(fd, &byte, 1) > 0){
+					count = checkSframe(byte, count, 0x03, 0x03);
 					byte_received++;
 				}
 				//sleep(1);
@@ -214,7 +217,7 @@ int llopen(LinkLayer connectionParameters)
 }
 
 
-int createFrame(char *buf, int bufSize, char *new_buff){
+int createFrame(unsigned char *buf, int bufSize, char *new_buff){
 	char bcc = 0x00;
 	int i;
 	// to create the bcc
@@ -271,7 +274,7 @@ int checkSframeR(char c, int count, feedback feed){
 			else
 				R = 0x01;
 			break;
-		default 
+		default:
 		return 0;
 	}
 	switch(count){
@@ -312,14 +315,14 @@ int checkSframeR(char c, int count, feedback feed){
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
-int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAYLOAD thing
+int llwrite(unsigned char *buf, int bufSize) // We have to add the MAX_PAYLOAD thing
 {
-	char *new_buf = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
+	unsigned char *new_buff = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
 	int n_bytes = createFrame(buf, bufSize, new_buff);
 	alarmCount = 0;
 	(void)signal(SIGALRM, alarmHandler);	
 	int countRR = 0, countRJ = 0;
-	while(alarmCount < parameters.nRetrasmissions && countRR < 5){
+	while(alarmCount < parameters.nRetransmissions && countRR < 5){
 		usleep(DELAY); // NOT SURE YET
 		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled){
 			countRR = checkSframeR(buf[0], countRR, ack);  
@@ -343,9 +346,9 @@ int llwrite(const unsigned char *buf, int bufSize) // We have to add the MAX_PAY
 	}
 	//sleep(1);
 	usleep(DELAY); // NOT SURE YET
-	while(countRR < 5 read(fd, buf, 1) > 0){ // maybe to be thrown away
+	while(countRR < 5 && read(fd, buf, 1) > 0){ // maybe to be thrown away
 			countRR = checkSframeR(buf[0], countRR, ack);
-			if (count == 0) 
+			if (countRR == 0) 
 				return -1;
 		}
 	free(new_buff);
@@ -375,18 +378,18 @@ void sendAck(char c){
 }
 
 void sendNack(){
-	char ack;
-	switch(c){
+	char nack;
+	switch(frame_num_r){
 		case 0x00:
-			ack = 0x01;
+			nack = 0x01;
 			break;
 		case 0x40:
-			ack = 0x81;
+			nack = 0x81;
 			break;
 		default:
 			return;
 	}
-	sendSFrame(0x01, ack);
+	sendSFrame(0x01, nack);
 }
 
 int waitHeader(char c, int count, state *s){
@@ -405,7 +408,7 @@ int waitHeader(char c, int count, state *s){
 		case 2:
 			if (c == frame_num_r)
 			{
-				*s = actual;
+				*s = current;
 				return 3;
 			}	
 			else if (c == 0x7E)
@@ -420,7 +423,7 @@ int waitHeader(char c, int count, state *s){
 			}
 			else return 0;
 		case 3:
-			if (c == 0x03 ^ frame_num_r && (*s == actual))
+			if (c == 0x03 ^ frame_num_r && (*s == current))
 				return 4;
 			else if (c == 0x03 ^ frame_num_r ^ 0x40 && (*s == past)){
 				sendAck(c);
@@ -430,11 +433,9 @@ int waitHeader(char c, int count, state *s){
 				return -1;
 			}
 			else if (c == 0x7E){
-				*past = 0;
 				return 1;
 			}
 			else {
-				*past = 0;
 				return 0;
 			}
 		default:
@@ -466,7 +467,7 @@ int llread(unsigned char *packet)
 			byte_received++;
 			if (esc){
 				switch(byte){
-					case 0x5E;
+					case 0x5E:
 						packet[count_bytes++] = 0x7E;
 						bcc = bcc ^ 0x7E;
 						break;
@@ -533,7 +534,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 		case LlTx:
 			
 			(void)signal(SIGALRM, alarmHandler_t);
-			while(alarmCount_t < parameters.nRetrasmissions && count < 5){
+			while(alarmCount_t < parameters.nRetransmissions && count < 5){
 				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x0B);     
@@ -571,15 +572,17 @@ int llclose(int showStatistics, LinkLayerRole role)
 		case LlRx:
 			(void)signal(SIGALRM, alarmHandler_r);
 			
-			while(alarmCount_r < parameters.nRetrasmissions && count < 5){
+			while(alarmCount_r < parameters.nRetransmissions && count < 5){
 				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled_r){
 					count = checkSframe(byte, count, 0x03, 0x07);     
 					byte_received ++;
 				}
 				if (count == 5){
+					end_time = clock();
 					alarm(0);
 					alarmEnabled_r = 1;
+					byte_received_approved += 5;
 				}
 				if (alarmEnabled_r == FALSE && count < 5){
 					sendSFrame(0x01, 0x0B);
@@ -592,7 +595,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 			
 			}
-			byte_received_approved += 5;
+			end_time = clock();
 			/*sleep(1);
 			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x03, 0x07);      
@@ -613,7 +616,9 @@ int llclose(int showStatistics, LinkLayerRole role)
 	}
 	if(showStatistics){
 		float FER = 1.00 - (float) good_frames / (float) tot_frames;
-		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, (float) byte_received_approved * 8.0 / (float) parameters.baudRate);
+		float tot_time = (float)(end_time - start_time) / (float) CLOCKS_PER_SEC;
+		float R = (float) byte_received_approved * 8.0 / tot_time;
+		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, R / (float) parameters.baudRate);
 	}
     return close(fd);
 }
