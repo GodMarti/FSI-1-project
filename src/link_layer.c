@@ -20,7 +20,8 @@ struct termios oldtio_t; // I want to try to declare it outside the function jus
 struct termios oldtio_r;
 int tot_frames = 0;
 int good_frames = 0;
-int bit_received = 0;
+int byte_received_approved = 0;
+int byte_received = 0;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
@@ -87,6 +88,7 @@ int llopen(LinkLayer connectionParameters)
 {
 	parameters.timeout = connectionParameters.timeout;
 	parameters.nRetrasmissions = connectionParameters.nRetrasmissions;
+	parameters.baudRate = connectionParameters.baudRate;
     int fd = setconnection(connectionParameters.serialPort, connectionParameters.role);
 	if (fd < 0) 
 	{
@@ -138,11 +140,13 @@ int llopen(LinkLayer connectionParameters)
 		case LlRx:
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
-				if(read(fd, buf, BUF_SIZE) > 0)
-					count = checkSframe(buf[0], count, 0x03, 0x03);      
+				if(read(fd, buf, BUF_SIZE) > 0){
+					count = checkSframe(buf[0], count, 0x03, 0x03);
+					byte_received++;
+				}
 				//sleep(1);
 			}
-			
+			byte_received_approved += 5;
 			
 			if (sendSFrame(0x01, 0x07) != 5)
 				return -1;
@@ -444,8 +448,10 @@ int llread(unsigned char *packet)
 	state s;
 	usleep(DELAY); // NOT SURE YET
 	while (count < 4 && count != -1){
-		if (read(fd, &byte, 1) > 0)
+		if (read(fd, &byte, 1) > 0){
 			count = waitHeader(byte, count, &s);
+			byte_received++;
+		}
 	}
 	if (count == -1) 
 		return 0;
@@ -453,6 +459,7 @@ int llread(unsigned char *packet)
 	char bcc = 0x00; 	
 	while(!end && count_bytes < MAX_PAYLOAD_SIZE){
 		if (read(fd, &byte, 1) > 0){
+			byte_received++;
 			if (esc){
 				switch(byte){
 					case 0x5E;
@@ -486,8 +493,8 @@ int llread(unsigned char *packet)
 	sendAck(frame_num_r);
 	good_frames++;
 	frame_num_r = frame_num_r ^ 0x40;
-
-    return count_bytes;
+	byte_received_approved += count_bytes + 5;
+    return count_bytes - 1;
 }
 
 ////////////////////////////////////////////////
@@ -564,6 +571,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled_r){
 					count = checkSframe(byte, count, 0x03, 0x07);     
+					byte_received ++;
 				}
 				if (count == 5){
 					alarm(0);
@@ -580,6 +588,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 			
 			}
+			byte_received_approved += 5;
 			/*sleep(1);
 			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x03, 0x07);      
@@ -600,7 +609,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 	}
 	if(showStatistics){
 		float FER = 1.00 - (float) good_frames / (float) tot_frames;
-		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d", FER, DELAY, MAX_PAYLOAD_SIZE);
+		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, (float) byte_received_approved * 8.0 / (float) parameters.baudRate);
 	}
     return close(fd);
 }
