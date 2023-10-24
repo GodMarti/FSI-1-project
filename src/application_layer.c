@@ -9,7 +9,7 @@
 #include <unistd.h>
 #define STAT 1
 
-unsigned char *getControlPacket(char first, char *filename, int fileSize, int *cp_size){
+unsigned char *getControlPacket(char first, const char *filename, int fileSize, int *cp_size){
 	unsigned char *packet = malloc(MAX_PAYLOAD_SIZE * sizeof(char));
 	int size = 0, i;
 	packet[size++] = first;
@@ -40,7 +40,7 @@ unsigned char* getData(FILE *file, int fileSize){
 	return data;
 }
 
-unsigned char* getDataPacket(char *all_data, int data_size, int *dpSize){
+unsigned char* getDataPacket(char *all_data, int data_size){
 	unsigned char* packet = malloc((data_size + 3) * sizeof(char));
 	packet[0] = 0x01;
 	int dim, i;
@@ -68,7 +68,7 @@ int getSize(unsigned char *packet, int *bit){
 	return size;
 }
 
-unsigned char* checkControlPacket(unsigned char *packet, int packetSize,int *fileSize){
+unsigned char* checkControlPacket(unsigned char *packet, int packetSize, unsigned long int *fileSize){
 	int bit = 0,i;
 	if(packet[bit++] != 0x02)
 		return NULL;
@@ -135,12 +135,12 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
             int start = ftell(file);
             fseek(file,0L,SEEK_END);
-            long int fileSize = ftell(file)-start;
+            unsigned long int fileSize = ftell(file)-start;
             fseek(file,start,SEEK_SET);
 
             unsigned int cp_size;
             unsigned char *cpStart = getControlPacket(0x02, filename, fileSize, &cp_size);
-            if(llwrite(cpStart, cpSize) == -1){ 
+            if(llwrite(cpStart, cp_size) == -1){ 
                 printf("Exit: error in start packet\n");
                 exit(-1);
             }
@@ -172,7 +172,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 
             /*unsigned char *cpEnd = getControlPacket(0x03, filename, fileSize, &cpSize);*/ // do we really need to generate it again?
 			cpStart[0] = 0x03;
-            if(llwrite(fd, cpStart, cpSize) == -1) { 
+            if(llwrite(cpStart, cp_size) == -1) { 
                 printf("Exit: error in end packet\n");
                 exit(-1);
             }
@@ -191,14 +191,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 				printf("Exit: error in start packet\n");
 				exit(-1);
 			}
-            unsigned long int fileSize = 0;
-            unsigned char* file_name = checkControlPacket(packet, packetSize, &fileSize); 
+            unsigned long int file_size = 0;
+            unsigned char* file_name = checkControlPacket(packet, packetSize, &file_size); 
 			if (file_name == NULL){
 				printf("Exit: error in start packet\n");
 				exit(-1);
-			}
-            FILE* file = fopen(file_name, "wb+");
-			if (file == NULL) {
+			}				
+            FILE* new_file = fopen(file_name, "wb+");
+			if (new_file == NULL) {
                 perror("File not found\n");
                 exit(-1);
             }
@@ -209,7 +209,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 if(packet[0] != 3){
                     unsigned char *buffer = malloc((packetSize - 3) * sizeof(char));
                     if (checkDataPacket(packet, packetSize, buffer)) 
-						fwrite(buffer, sizeof(char), packetSize-3, file);
+						fwrite(buffer, sizeof(char), packetSize-3, new_file);
 					else{
 						printf("Exit: error in data packet\n");
 						exit(-1);
@@ -221,7 +221,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 					
 					unsigned long int fileSize_check = 0;
 					unsigned char* file_name_check = checkControlPacket(packet, packetSize, &fileSize_check);
-					if (fileSize_check != fileSize || strcmp(file_name, file_name_check) != 0){
+					if (fileSize_check != file_size || strcmp(file_name, file_name_check) != 0){
 						printf("Exit: error in end packet\n");
 						exit(-1);
 					}
@@ -231,7 +231,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             }
 			free(file_name);
 			free(packet);
-            fclose(file);
+            fclose(new_file);
 			llclose(STAT, linkLayer.role);
             break;
 
