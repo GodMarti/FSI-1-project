@@ -111,9 +111,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     LinkLayer linkLayer;
     strcpy(linkLayer.serialPort,serialPort);
 	if(strcmp(role, "tx") == 0)
-		linkLayer.role = LlRx;
-	else
 		linkLayer.role = LlTx;
+	else
+		linkLayer.role = LlRx;
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
     linkLayer.timeout = timeout;
