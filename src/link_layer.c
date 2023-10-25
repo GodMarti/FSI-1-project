@@ -17,9 +17,8 @@
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
-#define BUF_SIZE 256 // NOT SURE YET
-#define prob_err 0.5
-#define DELAY 1
+#define prob_err 0.1
+#define DELAY 50
 clock_t start_time;
 clock_t end_time;
 int BAUDRATE;
@@ -168,33 +167,21 @@ int llopen(LinkLayer connectionParameters)
 			(void)signal(SIGALRM, alarmHandler);
 			printf("Pronto a iniziare a mandare\n");
 			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
-				/*printf("Sono nel while\n");*/
-				/*usleep(DELAY); // NOT SURE*/
-				
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
-					/*printf("Entro nel while dove non devo entrare\n");*/
 					count = checkSframe(byte, count, 0x01, 0x07);     
 				}
-				/*printf("Non ho letto nulla\n");*/
+				
 				if (count == 5){
 					alarm(0);
 					alarmEnabled = 1;
 				}
-				/*bytes = read(fd, buf, BUF_SIZE);
-				if (bytes == 5 && buf[1] ^ buf[2] == buf[3] && buf[0] == 0x7E && buf[4] == buf[0] && buf[1] == 0x01 && buf[2] == 0x07){
-					printf("Everything cool\n");
-					alarm(0);
-					alarmEnabled = TRUE;
-					alarmCount = 3;
-				}*/
+				
 				if (alarmEnabled == FALSE && count < 5){
 					printf("Provo a inviare il frame\n");
 					if (sendSFrame(0x03, 0x03) != 5){
 						printf("Errore: Frame per connettere non inviato\n");
 					}
 					else{
-						// Wait until all bytes have been written to the serial port
-						/*sleep(1);*/ // NOT SURE YET
 						alarm(connectionParameters.timeout);
 						alarmEnabled = TRUE;
 						printf("Frame per connettere inviato\n");
@@ -204,7 +191,6 @@ int llopen(LinkLayer connectionParameters)
 				
 			
 			}
-			/*sleep(1);*/
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
 					count = checkSframe(byte, count, 0x01, 0x07); 
@@ -350,11 +336,10 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 {
 	printf("Provo a scrivere frame\n");
 	unsigned char *new_buff = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
-	/*unsigned char new_buff[2 * MAX_PAYLOAD_SIZE];*/ // probabilmente non era qua il problema
 	int n_bytes = createFrame(buf, bufSize, new_buff);
 	alarmCount = 0;
 	alarmEnabled = FALSE;
-	(void)signal(SIGALRM, alarmHandler);	// maybe unnecessary
+	(void)signal(SIGALRM, alarmHandler);
 	int countRR = 0, countRJ = 0;
 	char byte;
 	while(alarmCount < parameters.nRetransmissions && countRR < 5){
@@ -362,7 +347,7 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 		while(read(fd, &byte, 1) > 0 && countRR < 5 && alarmEnabled){
 			countRR = checkSframeR(byte, countRR, accepted);  
 			if ((countRJ = checkSframeR(byte, countRJ, rejected)) == 5)
-				alarmEnabled = FALSE; // we have to check how to deal with the counter of the retransmissions		
+				alarmEnabled = FALSE; 	
 		}
 		if (countRR == 5){
 			alarm(0);
@@ -372,17 +357,13 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 			write(fd, new_buff, n_bytes);
 			printf("Frame mandato (%c)\n", frame_num_t);
 			tot_frames ++;
-			// Wait until all bytes have been written to the serial port
-			/*sleep(1); // NOT SURE YET*/
 			alarm(parameters.timeout);
 			alarmEnabled = TRUE;
 			
 		}
 	
 	}
-	//sleep(1);
-	usleep(DELAY); // NOT SURE YET
-	while(countRR < 5 && read(fd, &byte, 1) > 0){ // maybe to be thrown away
+	while(countRR < 5 && read(fd, &byte, 1) > 0){ 
 			countRR = checkSframeR(byte, countRR, accepted);
 			printf("Frame mandato (%c)\n", frame_num_t);
 			if (countRR == 0) {
@@ -390,14 +371,13 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 				return -1;
 			}
 		}
-	free(new_buff); // METTERLO SE FACCIO MALLOC
+	free(new_buff); 
 	if (countRR == 5){
 		printf("Frame ricevuto (%c)\n", frame_num_t);
 		return n_bytes;
 	}
 	printf("Frame mandato troppe volte senza essere ricevuto\n");
 	return -1;
-	//return 1;  RICORDARMI DI LEVARLO MA ADESSO MI SERVE
 }
 
 ////////////////////////////////////////////////
@@ -505,7 +485,7 @@ int llread(unsigned char *packet)
 	int count = 0;
 	char byte;
 	state s;
-	usleep(DELAY); // NOT SURE YET
+	usleep(DELAY);
 	while (count < 4 && count != -1){
 		if (read(fd, &byte, 1) > 0){
 			count = waitHeader(byte, count, &s);
@@ -573,7 +553,6 @@ int llread(unsigned char *packet)
 	memcpy(packet, bits, (count_bytes - 2) * sizeof(unsigned char));
 	free(bits);
     return count_bytes - 2;
-	return 0; // da levare
 }
 
 ////////////////////////////////////////////////
@@ -582,28 +561,11 @@ int llread(unsigned char *packet)
 
 
 
-/*int alarmCount_t = 0;
-int alarmEnabled_t = FALSE;
-
-int alarmCount_r = 0;
-int alarmEnabled_r = FALSE;
-
-void alarmHandler_t(int signal)
-{
-    alarmEnabled_t = FALSE;
-    alarmCount_t++;
-}
-void alarmHandler_r(int signal)
-{
-    alarmEnabled_r = FALSE;
-    alarmCount_r++;
-}*/
-
 
 int llclose(int showStatistics, LinkLayerRole role)
 {	
 	char byte;
-	int count;
+	int count = 0;
 	alarmEnabled = FALSE;
 	alarmCount = 0;
 	switch(role){
@@ -611,7 +573,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 			
 			(void)signal(SIGALRM, alarmHandler);
 			while(alarmCount < parameters.nRetransmissions && count < 5){
-				usleep(DELAY); // NOT SURE YET
+				usleep(DELAY); 
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x0B);     
 				}
@@ -621,17 +583,15 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 				if (alarmEnabled == FALSE && count < 5){
 					sendSFrame(0x03, 0x0B);
-
-					// Wait until all bytes have been written to the serial port
-					sleep(1); // NOT SURE YET
 					alarm(parameters.timeout);
 					alarmEnabled = TRUE;					
 				}			
 			}
-			//sleep(1);
-			usleep(DELAY); // NOT SURE YET
+			usleep(DELAY); 
 			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkSframe(byte, count, 0x01, 0x0B);     
+					count = checkSframe(byte, count, 0x01, 0x0B); 
+						if (count == 0)
+							return -1;
 				}
 			if (count != 5)
 				return -1;
@@ -669,22 +629,17 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 				if (alarmEnabled == FALSE && count < 5){
 					sendSFrame(0x01, 0x0B);
-
-					// Wait until all bytes have been written to the serial port
-					sleep(1); // NOT SURE YET
 					alarm(parameters.timeout);
 					alarmEnabled = TRUE;
 					
 				}
 			
 			}
-			end_time = clock();
-			/*sleep(1);
-			while(count < 5 && bytes = read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkSframe(byte, count, 0x03, 0x07);      
-				}
-			if (count != 5)
-				return -1;*/
+			if (count != 5){
+				printf("The connection has been closed because the frame DISC has been received, but the receiver didn't receive the UA frame, so something could have gone wrong, check if the file is ok\n");
+				end_time = clock();
+			}
+			
 			if(showStatistics){	
 				float FER = prob_err;
 				float tot_time = (float)(end_time - start_time) / (float) CLOCKS_PER_SEC;
