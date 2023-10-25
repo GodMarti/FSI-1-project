@@ -68,9 +68,9 @@ int getSize(unsigned char *packet, int *bit){
 	return size;
 }
 
-unsigned char* checkControlPacket(unsigned char *packet, int packetSize, unsigned long int *fileSize){
+unsigned char* checkControlPacket(char state, unsigned char *packet, int packetSize, unsigned long int *fileSize){
 	int bit = 0,i;
-	if(packet[bit++] != 0x02)
+	if(packet[bit++] != state)
 		return NULL;
 	int n;
 	unsigned char* file_name; 
@@ -95,13 +95,9 @@ unsigned char* checkControlPacket(unsigned char *packet, int packetSize, unsigne
 	return file_name;
 }
 
-int checkDataPacket(unsigned char *packet, int packetSize, unsigned char *buffer){
-	if (packet[0] != 0x01 || 256*packet[1] + packet[2] != packetSize) // we have to return an error if the first three are wrong? NOT SURE ABOUT IT
+int checkDataPacket(unsigned char *packet, int packetSize){
+	if (packet[0] != 0x01 || 256*packet[1] + packet[2] != packetSize - 3) // we have to return an error if the first three are wrong? NOT SURE ABOUT IT
 		return 0;
-	int i;
-	for (i = 0; i < packetSize-3; i ++){
-		buffer[i] = packet[i + 3];
-	}
 	return 1;
 }
 
@@ -117,35 +113,35 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
     linkLayer.baudRate = baudRate;
     linkLayer.nRetransmissions = nTries;
     linkLayer.timeout = timeout;
-
-    int fd;
-    if ((fd = llopen(linkLayer)) < 0) {
+    if ((llopen(linkLayer)) < 0) {
         perror("Connection error\n");
         exit(-1);
     }
 	switch (linkLayer.role) {
 
         case LlTx: 
-            
+            /*printf("Entro nella fase dopo la connessione\n");*/
             FILE* file = fopen(filename, "rb");
             if (file == NULL) {
                 perror("File not found\n");
                 exit(-1);
             }
-
+			printf("Ho aperto il file\n");
             int start = ftell(file);
             fseek(file,0L,SEEK_END);
             unsigned long int fileSize = ftell(file)-start;
             fseek(file,start,SEEK_SET);
-
+			printf("Ho calcolato la lunghezza del file\n");
             unsigned int cp_size;
             unsigned char *cpStart = getControlPacket(0x02, filename, fileSize, &cp_size);
+			printf("Ho pronto il primo pacchetto da inviare\n");
             if(llwrite(cpStart, cp_size) == -1){ 
-                printf("Exit: error in start packet\n");
+                printf("Datalink_layer: Exit: error in start packet\n");
                 exit(-1);
             }
 
             /*unsigned char sequence = 0;*/
+			printf("Inizio con i data packet\n");
             unsigned char* all_data = getData(file, fileSize);
 			unsigned char* start_data = all_data; // only for the free
             /*long int to_be_sent = fileSize;*/
@@ -162,14 +158,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 unsigned char* data_packet = getDataPacket(all_data, data_size);
                 all_data += data_size;
                 if(llwrite(data_packet, data_size + 3) == -1) { // maybe it's better != data_size + 3
-                    printf("Exit: error in data packets\n");
+                    printf("Exit: error in data packets, datalink_layer level\n");
                     exit(-1);
                 }
                 
                 fileSize -= data_size; 
                 free(data_packet);  
             }
-
+			printf("Ho finito i data packets\n");
             /*unsigned char *cpEnd = getControlPacket(0x03, filename, fileSize, &cpSize);*/ // do we really need to generate it again?
 			cpStart[0] = 0x03;
             if(llwrite(cpStart, cp_size) == -1) { 
@@ -183,48 +179,56 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
         
 
         case LlRx: 
-
+			/*printf("Entro nella fase dopo la connessione\n");*/
             unsigned char *packet = malloc(MAX_PAYLOAD_SIZE * sizeof(char));
             int packetSize = -1;
+			printf("Pronto a leggere il primo pacchetto\n");
             while ((packetSize = llread(packet)) < 0);
 			if (packet[0] != 0x02){ // NOT SURE ABOUT IT
 				printf("Exit: error in start packet\n");
 				exit(-1);
 			}
+			printf("Pacchetto di controllo iniziale arrivato e tutto a posto\n");
             unsigned long int file_size = 0;
-            unsigned char* file_name = checkControlPacket(packet, packetSize, &file_size); 
+            unsigned char* file_name = checkControlPacket(0x02, packet, packetSize, &file_size); 
 			if (file_name == NULL){
 				printf("Exit: error in start packet\n");
 				exit(-1);
 			}				
+			printf("Start packet: File: %s, Dim: %ld\n", file_name, file_size);
             FILE* new_file = fopen(file_name, "wb+");
 			if (new_file == NULL) {
                 perror("File not found\n");
                 exit(-1);
             }
             while (packet[0] != 3) {    
-                while ((packetSize = llread(packet)) <= 0);
-                /*if(packetSize == 0) 
-					stop = 1;*/
+                while ((packetSize = llread(packet)) < 0)
+					printf("Application layer: Ricevuto packet con errori\n");
+                if(packetSize == 0){
+						printf("Exit: error in data packet, no last control packet received\n");
+						exit(-1);
+					}
                 if(packet[0] != 3){
-                    unsigned char *buffer = malloc((packetSize - 3) * sizeof(char));
-                    if (checkDataPacket(packet, packetSize, buffer)) 
-						fwrite(buffer, sizeof(char), packetSize-3, new_file);
+					printf("Application layer: Ricevuto data packet, ora lo controllo\n");
+                    if (checkDataPacket(packet, packetSize)){	
+						fwrite(packet + 3, sizeof(char), packetSize-3, new_file);
+					}
 					else{
-						printf("Exit: error in data packet\n");
+						printf("Application layer: Exit: error in data packet\n");
 						exit(-1);
 					}
                     
-                    free(buffer);
                 }
 				else{
 					
-					unsigned long int fileSize_check = 0;
-					unsigned char* file_name_check = checkControlPacket(packet, packetSize, &fileSize_check);
-					if (fileSize_check != file_size || strcmp(file_name, file_name_check) != 0){
+					unsigned long int file_size_check = 0;
+					unsigned char* file_name_check = checkControlPacket(0x03, packet, packetSize, &file_size_check);
+					printf("End packet: File: %s, Dim: %ld\n", file_name_check, file_size_check);
+					if (file_size_check != file_size || strcmp(file_name, file_name_check) != 0){
 						printf("Exit: error in end packet\n");
 						exit(-1);
 					}
+					printf("Pacchetto di controllo finale arrivato e tutto a posto\n");
 					free(file_name_check);
 					
 				}
