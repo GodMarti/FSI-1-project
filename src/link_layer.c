@@ -9,6 +9,8 @@
 #include <time.h>
 #include <signal.h>
 #include <termios.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
@@ -16,7 +18,7 @@
 // LLOPEN
 ////////////////////////////////////////////////
 #define BUF_SIZE 256 // NOT SURE YET
-#define prob_err 0.0001
+#define prob_err 0.5
 #define DELAY 1
 clock_t start_time;
 clock_t end_time;
@@ -31,7 +33,7 @@ int byte_received = 0;
 int alarmEnabled = FALSE;
 int alarmCount = 0;
 volatile int STOP = FALSE;
-unsigned char frame_num_t = 0x40;
+unsigned char frame_num_t = 0x00;
 unsigned char frame_num_r = 0x40;
 LinkLayer parameters;
 int fd;
@@ -41,8 +43,6 @@ void alarmHandler(int signal)
 {
     alarmEnabled = FALSE;
     alarmCount++;
-
-    printf("Alarm #%d\n", alarmCount);
 }
 
 int checkSframe(char c, int count, char A, char C){
@@ -91,6 +91,7 @@ int sendSFrame(char A, char C){
 
 int setconnection(char *serialPort, LinkLayerRole role){
 	fd = open(serialPort, O_RDWR | O_NOCTTY);
+	printf("%d\n", fd);
     if (fd < 0)
     {
         perror(serialPort);
@@ -128,6 +129,12 @@ int setconnection(char *serialPort, LinkLayerRole role){
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
     newtio.c_cc[VMIN] = 0;  // Read what is on the buffer right now, without waiting
 	tcflush(fd, TCIOFLUSH);
+	
+	/*int flags = fcntl(fd, F_GETFL, 0);
+	flags |= O_NONBLOCK;
+	fcntl(fd, F_SETFL, flags);*/
+	
+	
 	// Set new port settings
     if (tcsetattr(fd, TCSANOW, &newtio) == -1)
     {
@@ -135,7 +142,7 @@ int setconnection(char *serialPort, LinkLayerRole role){
         return -1;
     }
 
-	return 1;
+	return fd;
 }
 
 int llopen(LinkLayer connectionParameters)
@@ -161,13 +168,14 @@ int llopen(LinkLayer connectionParameters)
 			(void)signal(SIGALRM, alarmHandler);
 			printf("Pronto a iniziare a mandare\n");
 			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
-				printf("Sono nel while\n");
+				/*printf("Sono nel while\n");*/
 				/*usleep(DELAY); // NOT SURE*/
+				
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
-					printf("Entro nel while dove non devo entrare\n");
+					/*printf("Entro nel while dove non devo entrare\n");*/
 					count = checkSframe(byte, count, 0x01, 0x07);     
 				}
-				printf("Non ho letto nulla\n");
+				/*printf("Non ho letto nulla\n");*/
 				if (count == 5){
 					alarm(0);
 					alarmEnabled = 1;
@@ -209,7 +217,6 @@ int llopen(LinkLayer connectionParameters)
 			start_time = clock();
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
-				printf("Aspetto byte\n");
 				if(read(fd, &byte, 1) > 0){
 					printf("%c ricevuto\n", byte);
 					count = checkSframe(byte, count, 0x03, 0x03);
@@ -233,12 +240,10 @@ int llopen(LinkLayer connectionParameters)
 }
 
 
-int createFrame(unsigned char *buf, int bufSize, char *new_buff){
-	char bcc = 0x00;
-	int i;
-	// to create the bcc
-	for (i = 0; i < bufSize; i ++)
-		bcc = bcc ^ buf[i];
+int createFrame(unsigned char *buf, unsigned int bufSize, char *new_buff){
+	good_frames++;
+	unsigned char bcc = 0x00;
+	int i; 
 	int c = 4;
 	// add FH 
 	new_buff[0] = 0x7E;
@@ -247,6 +252,7 @@ int createFrame(unsigned char *buf, int bufSize, char *new_buff){
 	new_buff[2] = frame_num_t; 
 	new_buff[3] = new_buff[1] ^ new_buff[2];
 	for (i = 0; i < bufSize; i ++){ // make a function for all of the stuffing
+		bcc = bcc ^ buf[i];
 		if (buf[i] == 0x7E){
 			new_buff[c++] = 0x7D;
 			new_buff[c++] = 0x5E;
@@ -273,18 +279,18 @@ int createFrame(unsigned char *buf, int bufSize, char *new_buff){
 	return c;
 }
 
-typedef enum{ack, rej}feedback;
+typedef enum{accepted, rejected}feedback;
 
 int checkSframeR(char c, int count, feedback feed){ 
 	char R;
 	switch(feed){
-		case ack:
+		case accepted:
 			if (frame_num_t == 0x40)
 				R = 0x05;
 			else
 				R = 0x85;
 			break;
-		case rej:
+		case rejected:
 			if (frame_num_t == 0x40)
 				R = 0x81;
 			else
@@ -332,53 +338,66 @@ int checkSframeR(char c, int count, feedback feed){
 // LLWRITE
 ////////////////////////////////////////////////
 
-int alarmEnabled_w = FALSE;
+/*int alarmEnabled_w = FALSE;
 int alarmCount_w = 0;
 void alarmHandler_w(int signal)
 {
     alarmEnabled_w = FALSE;
     alarmCount_w++;
-}
+}*/
 
-int llwrite(unsigned char *buf, int bufSize) // We have to add the MAX_PAYLOAD thing
+int llwrite(unsigned char *buf, unsigned int bufSize) 
 {
+	printf("Provo a scrivere frame\n");
 	unsigned char *new_buff = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
+	/*unsigned char new_buff[2 * MAX_PAYLOAD_SIZE];*/ // probabilmente non era qua il problema
 	int n_bytes = createFrame(buf, bufSize, new_buff);
-	alarmCount_w = 0;
-	alarmEnabled_w = FALSE;
-	(void)signal(SIGALRM, alarmHandler_w);	
+	alarmCount = 0;
+	alarmEnabled = FALSE;
+	(void)signal(SIGALRM, alarmHandler);	// maybe unnecessary
 	int countRR = 0, countRJ = 0;
-	while(alarmCount_w < parameters.nRetransmissions && countRR < 5){
+	char byte;
+	while(alarmCount < parameters.nRetransmissions && countRR < 5){
 		usleep(DELAY); // NOT SURE YET
-		while(read(fd, buf, 1) > 0 && countRR < 5 && alarmEnabled_w){
-			countRR = checkSframeR(buf[0], countRR, ack);  
-			if ((countRJ = checkSframeR(buf[0], countRJ, rej)) == 5)
-				alarmEnabled_w = FALSE; // we have to check how to deal with the counter of the retransmissions		
+		while(read(fd, &byte, 1) > 0 && countRR < 5 && alarmEnabled){
+			countRR = checkSframeR(byte, countRR, accepted);  
+			if ((countRJ = checkSframeR(byte, countRJ, rejected)) == 5)
+				alarmEnabled = FALSE; // we have to check how to deal with the counter of the retransmissions		
 		}
 		if (countRR == 5){
-					alarm(0);
-					alarmEnabled_w = 1;
+			alarm(0);
+			alarmEnabled = 1;
 		}
-		if (alarmEnabled_w == FALSE && countRR < 5){
+		if (alarmEnabled == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
+			printf("Frame mandato (%c)\n", frame_num_t);
 			tot_frames ++;
 			// Wait until all bytes have been written to the serial port
 			/*sleep(1); // NOT SURE YET*/
 			alarm(parameters.timeout);
-			alarmEnabled_w = TRUE;
+			alarmEnabled = TRUE;
 			
 		}
 	
 	}
 	//sleep(1);
 	usleep(DELAY); // NOT SURE YET
-	while(countRR < 5 && read(fd, buf, 1) > 0){ // maybe to be thrown away
-			countRR = checkSframeR(buf[0], countRR, ack);
-			if (countRR == 0) 
+	while(countRR < 5 && read(fd, &byte, 1) > 0){ // maybe to be thrown away
+			countRR = checkSframeR(byte, countRR, accepted);
+			printf("Frame mandato (%c)\n", frame_num_t);
+			if (countRR == 0) {
+				printf("Frame mandato troppe volte senza essere ricevuto\n");
 				return -1;
+			}
 		}
-	free(new_buff);
-    return n_bytes;
+	free(new_buff); // METTERLO SE FACCIO MALLOC
+	if (countRR == 5){
+		printf("Frame ricevuto (%c)\n", frame_num_t);
+		return n_bytes;
+	}
+	printf("Frame mandato troppe volte senza essere ricevuto\n");
+	return -1;
+	//return 1;  RICORDARMI DI LEVARLO MA ADESSO MI SERVE
 }
 
 ////////////////////////////////////////////////
@@ -400,11 +419,11 @@ void sendAck(char c){
 			return;
 	}
 	sendSFrame(0x01, ack);
-	
 }
 
 void sendNack(){
 	char nack;
+	printf("Chiedo di rimandare il frame (%c)\n", frame_num_r);
 	switch(frame_num_r){
 		case 0x00:
 			nack = 0x01;
@@ -421,8 +440,12 @@ void sendNack(){
 int waitHeader(char c, int count, state *s){
 	switch(count){
 		case 0:
-			if(c == 0x7E)
-				return 1;
+			if(c == 0x7E){
+				if (*s != disc)
+					return 1;
+				else
+					return -1;
+			}			
 			else 
 				return 0;
 		case 1:
@@ -447,21 +470,25 @@ int waitHeader(char c, int count, state *s){
 				*s = disc;
 				return 3;
 			}
-			else return 0;
+			else 
+				return 0;
 		case 3:
 			if (c == 0x03 ^ frame_num_r && (*s == current))
 				return 4;
 			else if (c == 0x03 ^ frame_num_r ^ 0x40 && (*s == past)){
-				sendAck(c);
+				printf("Non è il frame che aspettavo, invio ack (%c)", frame_num_r ^ 0x40);
+				sendAck(frame_num_r ^ 0x40);
 				return 0;
 			}
 			else if (c == 0x03 ^ 0x0B && (*s == disc)){
-				return -1;
+				return 0;
 			}
 			else if (c == 0x7E){
 				return 1;
 			}
 			else {
+				if (*s == disc)
+					*s = current;
 				return 0;
 			}
 		default:
@@ -473,6 +500,7 @@ int waitHeader(char c, int count, state *s){
 
 int llread(unsigned char *packet)
 {
+	printf("Provo a leggere frame\n");
     // to wait the header
 	int count = 0;
 	char byte;
@@ -484,48 +512,68 @@ int llread(unsigned char *packet)
 			byte_received++;
 		}
 	}
+	if (count == -1) // disc
+		return 0;
+	printf("Header arrivato\n");
 	if (count == -1) 
 		return 0;
 	int count_bytes = 0, end = 0, esc = 0;
-	char bcc = 0x00; 	
-	while(!end && count_bytes < MAX_PAYLOAD_SIZE){
+	unsigned char bcc = 0x00, bcc_back; 	
+	unsigned char *bits = malloc((MAX_PAYLOAD_SIZE + 1) * sizeof(unsigned char));
+	while(!end && count_bytes < MAX_PAYLOAD_SIZE + 2){
 		if (read(fd, &byte, 1) > 0){
 			byte_received++;
 			if (esc){
 				switch(byte){
 					case 0x5E:
-						packet[count_bytes++] = 0x7E;
+						bits[count_bytes++] = 0x7E;
+						bcc_back = bcc;
 						bcc = bcc ^ 0x7E;
 						break;
 					case 0x5D:
-						packet[count_bytes++] = 0x7D;
+						bits[count_bytes++] = 0x7D;
+						bcc_back = bcc;
 						bcc = bcc ^ 0x7D;
 						break;
 					default:
+						printf("In questo pacchetto dopo un ESC non c'è il valore atteso\n");
 						sendNack();
 						return -1;
 				}
 				esc = 0;
 			}
 			else if (byte == 0x7D){
+				esc = 1;
+			}
+			else if (byte == 0x7E){
 				end = 1;
+				count_bytes ++;
 			}
 			else{
-				packet[count_bytes ++] = byte;
+				bits[count_bytes ++] = byte;
+				bcc_back = bcc;
 				bcc = bcc ^ byte;
 			}
+			
 		}
 	}
-	srand(time(NULL));
-	if (!end || bcc != packet[count_bytes - 1] || (double)rand() / RAND_MAX < prob_err){
+	srand(time(NULL)); // to put FER
+	if (!end || bcc_back != bits[count_bytes - 2] || (float)rand() / RAND_MAX < prob_err){
 		sendNack();
+		if (!end)
+			printf("L'ultimo bit non era il flag che indica la fine\n");
+		if (bcc_back != bits[count_bytes - 2])
+			printf("Non ha passato il controllo del bcc\n");
 		return -1;
 	}
 	sendAck(frame_num_r);
-	good_frames++;
+	printf("Frame ricevuto giusto e segnalato (%c)\n", frame_num_r);
 	frame_num_r = frame_num_r ^ 0x40;
-	byte_received_approved += count_bytes + 5;
-    return count_bytes - 1;
+	byte_received_approved += count_bytes + 4;
+	memcpy(packet, bits, (count_bytes - 2) * sizeof(unsigned char));
+	free(bits);
+    return count_bytes - 2;
+	return 0; // da levare
 }
 
 ////////////////////////////////////////////////
@@ -534,7 +582,7 @@ int llread(unsigned char *packet)
 
 
 
-int alarmCount_t = 0;
+/*int alarmCount_t = 0;
 int alarmEnabled_t = FALSE;
 
 int alarmCount_r = 0;
@@ -549,33 +597,35 @@ void alarmHandler_r(int signal)
 {
     alarmEnabled_r = FALSE;
     alarmCount_r++;
-}
+}*/
 
 
 int llclose(int showStatistics, LinkLayerRole role)
 {	
 	char byte;
 	int count;
+	alarmEnabled = FALSE;
+	alarmCount = 0;
 	switch(role){
 		case LlTx:
 			
-			(void)signal(SIGALRM, alarmHandler_t);
-			while(alarmCount_t < parameters.nRetransmissions && count < 5){
+			(void)signal(SIGALRM, alarmHandler);
+			while(alarmCount < parameters.nRetransmissions && count < 5){
 				usleep(DELAY); // NOT SURE YET
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x0B);     
 				}
 				if (count == 5){
 					alarm(0);
-					alarmEnabled_t = 1;
+					alarmEnabled = 1;
 				}
-				if (alarmEnabled_t == FALSE && count < 5){
+				if (alarmEnabled == FALSE && count < 5){
 					sendSFrame(0x03, 0x0B);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
 					alarm(parameters.timeout);
-					alarmEnabled_t = TRUE;					
+					alarmEnabled = TRUE;					
 				}			
 			}
 			//sleep(1);
@@ -588,6 +638,13 @@ int llclose(int showStatistics, LinkLayerRole role)
 			
 			sendSFrame(0x03, 0x07);
 			
+			if(showStatistics){
+				float FER = 1.00 - (float) good_frames / (float) tot_frames;
+				/*float tot_time = (float)(end_time - start_time) / (float) CLOCKS_PER_SEC;
+				float R = (float) byte_received_approved * 8.0 / tot_time;*/
+				printf("FER (based on real FER): %.5f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\n", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate);
+			}
+			
 			if (tcsetattr(fd, TCSANOW, &oldtio_t) == -1)
 			{
 				perror("tcsetattr");
@@ -596,27 +653,27 @@ int llclose(int showStatistics, LinkLayerRole role)
 			break;
 		
 		case LlRx:
-			(void)signal(SIGALRM, alarmHandler_r);
+			(void)signal(SIGALRM, alarmHandler);
 			
-			while(alarmCount_r < parameters.nRetransmissions && count < 5){
+			while(alarmCount < parameters.nRetransmissions && count < 5){
 				usleep(DELAY); // NOT SURE YET
-				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled_r){
+				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x03, 0x07);     
 					byte_received ++;
 				}
 				if (count == 5){
 					end_time = clock();
 					alarm(0);
-					alarmEnabled_r = 1;
+					alarmEnabled = 1;
 					byte_received_approved += 5;
 				}
-				if (alarmEnabled_r == FALSE && count < 5){
+				if (alarmEnabled == FALSE && count < 5){
 					sendSFrame(0x01, 0x0B);
 
 					// Wait until all bytes have been written to the serial port
 					sleep(1); // NOT SURE YET
 					alarm(parameters.timeout);
-					alarmEnabled_r = TRUE;
+					alarmEnabled = TRUE;
 					
 				}
 			
@@ -628,6 +685,12 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 			if (count != 5)
 				return -1;*/
+			if(showStatistics){	
+				float FER = prob_err;
+				float tot_time = (float)(end_time - start_time) / (float) CLOCKS_PER_SEC;
+				float R = (float) byte_received_approved * 8.0 / tot_time;
+				printf("FER (just based on errors generated from me): %.5f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f\n", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, R / (float) parameters.baudRate);
+			}
 			
 			if (tcsetattr(fd, TCSANOW, &oldtio_r) == -1)
 			{
@@ -639,12 +702,6 @@ int llclose(int showStatistics, LinkLayerRole role)
 		default:
 			return -1;
 
-	}
-	if(showStatistics){
-		float FER = 1.00 - (float) good_frames / (float) tot_frames;
-		float tot_time = (float)(end_time - start_time) / (float) CLOCKS_PER_SEC;
-		float R = (float) byte_received_approved * 8.0 / tot_time;
-		printf("FER: %.2f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, R / (float) parameters.baudRate);
-	}
+	}	
     return close(fd);
 }
