@@ -18,12 +18,11 @@
 // LLOPEN
 ////////////////////////////////////////////////
 #define prob_err 0.1
-#define DELAY 50
+#define DELAY 1000
 clock_t start_time;
 clock_t end_time;
 int BAUDRATE;
-struct termios oldtio_t; // I want to try to declare it outside the function just because we need to restore it but the application layer cannot see it
-struct termios oldtio_r;
+struct termios oldtio;
 int tot_frames = 0;
 int good_frames = 0;
 int byte_received_approved = 0;
@@ -88,7 +87,7 @@ int sendSFrame(char A, char C){
 	return write(fd, buf, 5);
 }
 
-int setconnection(char *serialPort, LinkLayerRole role){
+int setconnection(char *serialPort){
 	fd = open(serialPort, O_RDWR | O_NOCTTY);
 	printf("%d\n", fd);
     if (fd < 0)
@@ -99,22 +98,12 @@ int setconnection(char *serialPort, LinkLayerRole role){
 	/*struct termios oldtio;*/
     struct termios newtio;
 	// Save current port settings
-	switch(role){
-		case LlTx:
-			if (tcgetattr(fd, &oldtio_t) == -1)
-			{
-				perror("tcgetattr");
-				return -1;
-			}
-			break;
-		case LlRx:
-			if (tcgetattr(fd, &oldtio_r) == -1)
-			{
-				perror("tcgetattr");
-				return -1;
-			}
-			break;
+	if (tcgetattr(fd, &oldtio) == -1)
+	{
+		perror("tcgetattr");
+		return -1;
 	}
+	
 
     // Clear struct for new port settings
     memset(&newtio, 0, sizeof(newtio));
@@ -150,7 +139,7 @@ int llopen(LinkLayer connectionParameters)
 	parameters.nRetransmissions = connectionParameters.nRetransmissions;
 	parameters.baudRate = connectionParameters.baudRate;
 	BAUDRATE = connectionParameters.baudRate;
-    int fd = setconnection(connectionParameters.serialPort, connectionParameters.role);
+    int fd = setconnection(connectionParameters.serialPort);
 	if (fd < 0) 
 	{
 		printf("Error in the connection\n");
@@ -604,12 +593,6 @@ int llclose(int showStatistics, LinkLayerRole role)
 				float R = (float) byte_received_approved * 8.0 / tot_time;*/
 				printf("FER (based on real FER): %.5f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\n", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate);
 			}
-			
-			if (tcsetattr(fd, TCSANOW, &oldtio_t) == -1)
-			{
-				perror("tcsetattr");
-				return -1;
-			}
 			break;
 		
 		case LlRx:
@@ -647,16 +630,16 @@ int llclose(int showStatistics, LinkLayerRole role)
 				printf("FER (just based on errors generated from me): %.5f\nDelay: %d us\nMaximum Size of Frame: %d\nC: %d\nTransference time: %.5f\n", FER, DELAY, MAX_PAYLOAD_SIZE, parameters.baudRate, R / (float) parameters.baudRate);
 			}
 			
-			if (tcsetattr(fd, TCSANOW, &oldtio_r) == -1)
-			{
-				perror("tcsetattr");
-				return -1;
-			}
 			break;
 		
 		default:
 			return -1;
 
 	}	
+	if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
+			{
+				perror("tcsetattr");
+				return -1;
+			}
     return close(fd);
 }
