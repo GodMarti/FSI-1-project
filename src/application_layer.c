@@ -126,22 +126,22 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 perror("File not found\n");
                 exit(-1);
             }
-			printf("Ho aperto il file\n");
+			printf("File opened\n");
             int start = ftell(file);
             fseek(file,0L,SEEK_END);
             unsigned long int fileSize = ftell(file)-start;
             fseek(file,start,SEEK_SET);
-			printf("Ho calcolato la lunghezza del file\n");
+			printf("I calculated the file length\n");
             unsigned int cp_size;
             unsigned char *cpStart = getControlPacket(0x02, filename, fileSize, &cp_size);
-			printf("Ho pronto il primo pacchetto da inviare\n");
+			printf("First packet ready\n");
             if(llwrite(cpStart, cp_size) == -1){ 
                 printf("Datalink_layer: Exit: error in start packet\n");
                 exit(-1);
             }
 
             /*unsigned char sequence = 0;*/
-			printf("Inizio con i data packet\n");
+			printf("I start with data packets\n");
             unsigned char* all_data = getData(file, fileSize);
 			unsigned char* start_data = all_data; // only for the free
             /*long int to_be_sent = fileSize;*/
@@ -165,7 +165,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
                 fileSize -= data_size; 
                 free(data_packet);  
             }
-			printf("Ho finito i data packets\n");
+			printf("Data packets ended\n");
             /*unsigned char *cpEnd = getControlPacket(0x03, filename, fileSize, &cpSize);*/ // do we really need to generate it again?
 			cpStart[0] = 0x03;
             if(llwrite(cpStart, cp_size) == -1) { 
@@ -182,13 +182,13 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 			/*printf("Entro nella fase dopo la connessione\n");*/
             unsigned char *packet = malloc(MAX_PAYLOAD_SIZE * sizeof(char));
             int packetSize = -1;
-			printf("Pronto a leggere il primo pacchetto\n");
+			printf("Ready to read the first packet\n");
             while ((packetSize = llread(packet)) < 0);
 			if (packet[0] != 0x02){ // NOT SURE ABOUT IT
 				printf("Exit: error in start packet\n");
 				exit(-1);
 			}
-			printf("Pacchetto di controllo iniziale arrivato e tutto a posto\n");
+			printf("Everything fine with control packet\n");
             unsigned long int file_size = 0;
             unsigned char* file_name = checkControlPacket(0x02, packet, packetSize, &file_size); 
 			if (file_name == NULL){
@@ -203,13 +203,13 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
             }
             while (packet[0] != 3) {    
                 while ((packetSize = llread(packet)) < 0)
-					printf("Application layer: Ricevuto packet con errori\n");
+					printf("Application layer: Packet received contains errors\n");
                 if(packetSize == 0){
 						printf("Exit: error in data packet, no last control packet received\n");
 						exit(-1);
 					}
                 if(packet[0] != 3){
-					printf("Application layer: Ricevuto data packet, ora lo controllo\n");
+					printf("Application layer: Data packet received, I'll check it\n");
                     if (checkDataPacket(packet, packetSize)){	
 						fwrite(packet + 3, sizeof(char), packetSize-3, new_file);
 					}
@@ -228,7 +228,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate,
 						printf("Exit: error in end packet\n");
 						exit(-1);
 					}
-					printf("Pacchetto di controllo finale arrivato e tutto a posto\n");
+					printf("Everything smooth with the last packet\n");
 					free(file_name_check);
 					
 				}
