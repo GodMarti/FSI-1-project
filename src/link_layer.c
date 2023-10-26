@@ -17,7 +17,7 @@
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
-#define prob_err 0.1
+#define prob_err 0.5
 #define DELAY 1000
 clock_t start_time;
 clock_t end_time;
@@ -154,7 +154,7 @@ int llopen(LinkLayer connectionParameters)
 		
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);
-			printf("Pronto a iniziare a mandare\n");
+			printf("Ready to start sending\n");
 			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
 				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
 					count = checkSframe(byte, count, 0x01, 0x07);     
@@ -166,14 +166,14 @@ int llopen(LinkLayer connectionParameters)
 				}
 				
 				if (alarmEnabled == FALSE && count < 5){
-					printf("Provo a inviare il frame\n");
+					printf("I'll try to send the frame\n");
 					if (sendSFrame(0x03, 0x03) != 5){
-						printf("Errore: Frame per connettere non inviato\n");
+						printf("Errore: Connection frame not sent\n");
 					}
 					else{
 						alarm(connectionParameters.timeout);
 						alarmEnabled = TRUE;
-						printf("Frame per connettere inviato\n");
+						printf("Connection frame sent\n");
 					}
 					
 				}
@@ -193,7 +193,7 @@ int llopen(LinkLayer connectionParameters)
 			usleep(DELAY); // NOT SURE YET
 			while(count < 5){
 				if(read(fd, &byte, 1) > 0){
-					printf("%c ricevuto\n", byte);
+					printf("%c received\n", byte);
 					count = checkSframe(byte, count, 0x03, 0x03);
 					byte_received++;
 				}
@@ -323,7 +323,7 @@ void alarmHandler_w(int signal)
 
 int llwrite(unsigned char *buf, unsigned int bufSize) 
 {
-	printf("Provo a scrivere frame\n");
+	printf("I'll try to write a frame\n");
 	unsigned char *new_buff = malloc((2 * (bufSize + 1) + 5) * sizeof (char));
 	int n_bytes = createFrame(buf, bufSize, new_buff);
 	alarmCount = 0;
@@ -344,7 +344,7 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 		}
 		if (alarmEnabled == FALSE && countRR < 5){
 			write(fd, new_buff, n_bytes);
-			printf("Frame mandato (%c)\n", frame_num_t);
+			printf("Frame sent (%c)\n", frame_num_t);
 			tot_frames ++;
 			alarm(parameters.timeout);
 			alarmEnabled = TRUE;
@@ -354,18 +354,18 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 	}
 	while(countRR < 5 && read(fd, &byte, 1) > 0){ 
 			countRR = checkSframeR(byte, countRR, accepted);
-			printf("Frame mandato (%c)\n", frame_num_t);
+			printf("Frame sent (%c)\n", frame_num_t);
 			if (countRR == 0) {
-				printf("Frame mandato troppe volte senza essere ricevuto\n");
+				printf("Frame sent too many times\n");
 				return -1;
 			}
 		}
 	free(new_buff); 
 	if (countRR == 5){
-		printf("Frame ricevuto (%c)\n", frame_num_t);
+		printf("Frame received (%c)\n", frame_num_t);
 		return n_bytes;
 	}
-	printf("Frame mandato troppe volte senza essere ricevuto\n");
+	printf("Frame sent too many times\n");
 	return -1;
 }
 
@@ -392,7 +392,7 @@ void sendAck(char c){
 
 void sendNack(){
 	char nack;
-	printf("Chiedo di rimandare il frame (%c)\n", frame_num_r);
+	printf("I ask for the frame to be sent again (%c)\n", frame_num_r);
 	switch(frame_num_r){
 		case 0x00:
 			nack = 0x01;
@@ -445,7 +445,7 @@ int waitHeader(char c, int count, state *s){
 			if (c == 0x03 ^ frame_num_r && (*s == current))
 				return 4;
 			else if (c == 0x03 ^ frame_num_r ^ 0x40 && (*s == past)){
-				printf("Non è il frame che aspettavo, invio ack (%c)", frame_num_r ^ 0x40);
+				printf("It's not the frame I was waiting for, send ack (%c)", frame_num_r ^ 0x40);
 				sendAck(frame_num_r ^ 0x40);
 				return 0;
 			}
@@ -469,7 +469,7 @@ int waitHeader(char c, int count, state *s){
 
 int llread(unsigned char *packet)
 {
-	printf("Provo a leggere frame\n");
+	printf("I try to read the frame\n");
     // to wait the header
 	int count = 0;
 	char byte;
@@ -483,7 +483,7 @@ int llread(unsigned char *packet)
 	}
 	if (count == -1) // disc
 		return 0;
-	printf("Header arrivato\n");
+	printf("Header arrived\n");
 	if (count == -1) 
 		return 0;
 	int count_bytes = 0, end = 0, esc = 0;
@@ -505,7 +505,7 @@ int llread(unsigned char *packet)
 						bcc = bcc ^ 0x7D;
 						break;
 					default:
-						printf("In questo pacchetto dopo un ESC non c'è il valore atteso\n");
+						printf("Not acceptable value after ESC\n");
 						sendNack();
 						return -1;
 				}
@@ -530,13 +530,13 @@ int llread(unsigned char *packet)
 	if (!end || bcc_back != bits[count_bytes - 2] || (float)rand() / RAND_MAX < prob_err){
 		sendNack();
 		if (!end)
-			printf("L'ultimo bit non era il flag che indica la fine\n");
+			printf("Last bit wasn't the flag expected\n");
 		if (bcc_back != bits[count_bytes - 2])
-			printf("Non ha passato il controllo del bcc\n");
+			printf("BCC control not passed\n");
 		return -1;
 	}
 	sendAck(frame_num_r);
-	printf("Frame ricevuto giusto e segnalato (%c)\n", frame_num_r);
+	printf("Frame received correctly, send ack (%c)\n", frame_num_r);
 	frame_num_r = frame_num_r ^ 0x40;
 	byte_received_approved += count_bytes + 4;
 	memcpy(packet, bits, (count_bytes - 2) * sizeof(unsigned char));
