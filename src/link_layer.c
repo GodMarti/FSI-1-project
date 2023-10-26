@@ -63,7 +63,7 @@ int checkSframe(char c, int count, char A, char C){
 				return 1;
 			else return 0;
 		case 3:
-			if (c == A ^ C)
+			if (c == (A ^ C))
 				return 4;
 			else if (c == 0x7E)
 				return 1;
@@ -293,7 +293,7 @@ int checkSframeR(char c, int count, feedback feed){
 				return 1;
 			else return 0;
 		case 3:
-			if (c == R ^ 0x01)
+			if (c == (R ^ 0x01))
 				return 4;
 			else if (c == 0x7E)
 				return 1;
@@ -431,7 +431,7 @@ int waitHeader(char c, int count, state *s){
 			}	
 			else if (c == 0x7E)
 				return 1;
-			else if (c == frame_num_r ^ 0x40){
+			else if (c == (frame_num_r ^ 0x40)){
 				*s = past;
 				return 3;
 			}
@@ -442,14 +442,14 @@ int waitHeader(char c, int count, state *s){
 			else 
 				return 0;
 		case 3:
-			if (c == 0x03 ^ frame_num_r && (*s == current))
+			if (c == (0x03 ^ frame_num_r) && (*s == current))
 				return 4;
-			else if (c == 0x03 ^ frame_num_r ^ 0x40 && (*s == past)){
+			else if (c == (0x03 ^ frame_num_r ^ 0x40) && (*s == past)){
 				printf("It's not the frame I was waiting for, send ack (%c)", frame_num_r ^ 0x40);
 				sendAck(frame_num_r ^ 0x40);
 				return 0;
 			}
-			else if (c == 0x03 ^ 0x0B && (*s == disc)){
+			else if (c == (0x03 ^ 0x0B) && (*s == disc)){
 				return 0;
 			}
 			else if (c == 0x7E){
