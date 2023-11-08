@@ -17,8 +17,10 @@
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
-#define prob_err 0.5
-#define DELAY 1000
+#define prob_err 0
+#define DELAY 0
+
+typedef enum {START, FLAG_RCV, A_RCV, C_RCV, BCC_OK, STOP, ERR} LinkLayerState;
 clock_t start_time;
 clock_t end_time;
 int BAUDRATE;
@@ -30,7 +32,7 @@ int byte_received = 0;
 
 int alarmEnabled = FALSE;
 int alarmCount = 0;
-volatile int STOP = FALSE;
+/*volatile int STOP = FALSE;*/
 unsigned char frame_num_t = 0x00;
 unsigned char frame_num_r = 0x40;
 LinkLayer parameters;
@@ -43,37 +45,37 @@ void alarmHandler(int signal)
     alarmCount++;
 }
 
-int checkSframe(char c, int count, char A, char C){
-	switch(count){
-		case 0:
+LinkLayerState checkSframe(char c, LinkLayerState state, char A, char C){
+	switch(state){
+		case START:
 			if(c == 0x7E)
-				return 1;
+				return FLAG_RCV;
 			else 
-				return 0;
-		case 1:
+				return START;
+		case FLAG_RCV:
 			if (c == A)
-				return 2;
+				return A_RCV;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 2:
+				return FLAG_RCV;
+			else return START;
+		case A_RCV:
 			if (c == C)
-				return 3;
+				return C_RCV;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 3:
+				return FLAG_RCV;
+			else return START;
+		case C_RCV:
 			if (c == (A ^ C))
-				return 4;
+				return BCC_OK;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 4:
+				return FLAG_RCV;
+			else return START;
+		case BCC_OK:
 			if (c == 0x7E)
-				return 5;
-			else return 0;
+				return STOP;
+			else return START;
 		default:
-			return 0;				
+			return START;				
 	}
 }
 
@@ -118,9 +120,6 @@ int setconnection(char *serialPort){
     newtio.c_cc[VMIN] = 0;  // Read what is on the buffer right now, without waiting
 	tcflush(fd, TCIOFLUSH);
 	
-	/*int flags = fcntl(fd, F_GETFL, 0);
-	flags |= O_NONBLOCK;
-	fcntl(fd, F_SETFL, flags);*/
 	
 	
 	// Set new port settings
@@ -148,24 +147,24 @@ int llopen(LinkLayer connectionParameters)
 	else{
 		printf("Connection ok\n");
 	}
-	int count = 0;
+	LinkLayerState state = START;
 	unsigned char byte;
 	switch(connectionParameters.role){
 		
 		case LlTx:
 			(void)signal(SIGALRM, alarmHandler);
 			printf("Ready to start sending\n");
-			while(alarmCount < connectionParameters.nRetransmissions && count < 5){
-				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
-					count = checkSframe(byte, count, 0x01, 0x07);     
+			while(alarmCount < connectionParameters.nRetransmissions && state != STOP){
+				while(read(fd, &byte, 1) > 0 && state != STOP && alarmEnabled){
+					state = checkSframe(byte, state, 0x01, 0x07);     
 				}
 				
-				if (count == 5){
+				if (state == STOP){
 					alarm(0);
 					alarmEnabled = 1;
 				}
 				
-				if (alarmEnabled == FALSE && count < 5){
+				if (alarmEnabled == FALSE && state != STOP){
 					printf("I'll try to send the frame\n");
 					if (sendSFrame(0x03, 0x03) != 5){
 						printf("Errore: Connection frame not sent\n");
@@ -181,20 +180,20 @@ int llopen(LinkLayer connectionParameters)
 			
 			}
 			usleep(DELAY); // NOT SURE YET
-			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkSframe(byte, count, 0x01, 0x07); 
+			while(state != STOP && read(fd, &byte, 1) > 0){ 
+					state = checkSframe(byte, state, 0x01, 0x07); 
 				}
-			if (count != 5)
+			if (state != STOP)
 				return -1;
 			break;
 			
 		case LlRx:
 			start_time = clock();
 			usleep(DELAY); // NOT SURE YET
-			while(count < 5){
+			while(state != STOP){
 				if(read(fd, &byte, 1) > 0){
 					printf("%c received\n", byte);
-					count = checkSframe(byte, count, 0x03, 0x03);
+					state = checkSframe(byte, state, 0x03, 0x03);
 					byte_received++;
 				}
 				//sleep(1);
@@ -256,7 +255,7 @@ int createFrame(unsigned char *buf, unsigned int bufSize, char *new_buff){
 
 typedef enum{accepted, rejected}feedback;
 
-int checkSframeR(char c, int count, feedback feed){ 
+LinkLayerState checkSframeR(char c, LinkLayerState state, feedback feed){ 
 	char R;
 	switch(feed){
 		case accepted:
@@ -272,38 +271,38 @@ int checkSframeR(char c, int count, feedback feed){
 				R = 0x01;
 			break;
 		default:
-		return 0;
+		return START;
 	}
-	switch(count){
-		case 0:
+	switch(state){
+		case START:
 			if(c == 0x7E)
-				return 1;
+				return FLAG_RCV;
 			else 
-				return 0;
-		case 1:
+				return START;
+		case FLAG_RCV:
 			if (c == 0x01)
-				return 2;
+				return A_RCV;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 2:
+				return FLAG_RCV;
+			else return START;
+		case A_RCV:
 			if (c == R)
-				return 3;
+				return C_RCV;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 3:
+				return FLAG_RCV;
+			else return START;
+		case C_RCV:
 			if (c == (R ^ 0x01))
-				return 4;
+				return BCC_OK;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 4:
+				return FLAG_RCV;
+			else return START;
+		case BCC_OK:
 			if (c == 0x7E)
-				return 5;
-			else return 0;
+				return STOP;
+			else return START;
 		default:
-			return 0;				
+			return START;				
 	}
 }
 
@@ -313,13 +312,7 @@ int checkSframeR(char c, int count, feedback feed){
 // LLWRITE
 ////////////////////////////////////////////////
 
-/*int alarmEnabled_w = FALSE;
-int alarmCount_w = 0;
-void alarmHandler_w(int signal)
-{
-    alarmEnabled_w = FALSE;
-    alarmCount_w++;
-}*/
+
 
 int llwrite(unsigned char *buf, unsigned int bufSize) 
 {
@@ -329,20 +322,20 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 	alarmCount = 0;
 	alarmEnabled = FALSE;
 	(void)signal(SIGALRM, alarmHandler);
-	int countRR = 0, countRJ = 0;
+	LinkLayerState stateRR = 0, stateRJ = 0;
 	char byte;
-	while(alarmCount < parameters.nRetransmissions && countRR < 5){
+	while(alarmCount < parameters.nRetransmissions && stateRR != STOP){
 		usleep(DELAY); // NOT SURE YET
-		while(read(fd, &byte, 1) > 0 && countRR < 5 && alarmEnabled){
-			countRR = checkSframeR(byte, countRR, accepted);  
-			if ((countRJ = checkSframeR(byte, countRJ, rejected)) == 5)
+		while(read(fd, &byte, 1) > 0 && stateRR != STOP && alarmEnabled){
+			stateRR = checkSframeR(byte, stateRR, accepted);  
+			if ((stateRJ = checkSframeR(byte, stateRJ, rejected)) == STOP)
 				alarmEnabled = FALSE; 	
 		}
-		if (countRR == 5){
+		if (stateRR == STOP){
 			alarm(0);
 			alarmEnabled = 1;
 		}
-		if (alarmEnabled == FALSE && countRR < 5){
+		if (alarmEnabled == FALSE && stateRR != STOP){
 			write(fd, new_buff, n_bytes);
 			printf("Frame sent (%c)\n", frame_num_t);
 			tot_frames ++;
@@ -352,16 +345,16 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 		}
 	
 	}
-	while(countRR < 5 && read(fd, &byte, 1) > 0){ 
-			countRR = checkSframeR(byte, countRR, accepted);
+	while(stateRR != STOP && read(fd, &byte, 1) > 0){ 
+			stateRR = checkSframeR(byte, stateRR, accepted);
 			printf("Frame sent (%c)\n", frame_num_t);
-			if (countRR == 0) {
+			if (stateRR == START) {
 				printf("Frame sent too many times\n");
 				return -1;
 			}
 		}
 	free(new_buff); 
-	if (countRR == 5){
+	if (stateRR == STOP){
 		printf("Frame received (%c)\n", frame_num_t);
 		return n_bytes;
 	}
@@ -373,7 +366,7 @@ int llwrite(unsigned char *buf, unsigned int bufSize)
 // LLREAD
 ////////////////////////////////////////////////
 
-typedef enum {current, past, disc}state;
+typedef enum {current, past, disc}which_frame;
 
 void sendAck(char c){
 	char ack;
@@ -406,62 +399,62 @@ void sendNack(){
 	sendSFrame(0x01, nack);
 }
 
-int waitHeader(char c, int count, state *s){
-	switch(count){
-		case 0:
+LinkLayerState waitHeader(char c, LinkLayerState state, which_frame *s){
+	switch(state){
+		case START:
 			if(c == 0x7E){
 				if (*s != disc)
-					return 1;
+					return FLAG_RCV;
 				else
-					return -1;
+					return ERR;
 			}			
 			else 
-				return 0;
-		case 1:
+				return START;
+		case FLAG_RCV:
 			if (c == 0x03)
-				return 2;
+				return A_RCV;
 			else if (c == 0x7E)
-				return 1;
-			else return 0;
-		case 2:
+				return FLAG_RCV;
+			else return START;
+		case A_RCV:
 			if (c == frame_num_r)
 			{
 				*s = current;
-				return 3;
+				return C_RCV;
 			}	
 			else if (c == 0x7E)
-				return 1;
+				return FLAG_RCV;
 			else if (c == (frame_num_r ^ 0x40)){
 				*s = past;
-				return 3;
+				return C_RCV;
 			}
 			else if (c == 0x0B){
 				*s = disc;
-				return 3;
+				return C_RCV;
 			}
 			else 
-				return 0;
-		case 3:
+				return START;
+		case C_RCV:
 			if (c == (0x03 ^ frame_num_r) && (*s == current))
-				return 4;
+				return BCC_OK;
 			else if (c == (0x03 ^ frame_num_r ^ 0x40) && (*s == past)){
 				printf("It's not the frame I was waiting for, send ack (%c)", frame_num_r ^ 0x40);
 				sendAck(frame_num_r ^ 0x40);
-				return 0;
+				return START;
 			}
 			else if (c == (0x03 ^ 0x0B) && (*s == disc)){
-				return 0;
+				return START;
 			}
 			else if (c == 0x7E){
-				return 1;
+				return FLAG_RCV;
 			}
 			else {
 				if (*s == disc)
 					*s = current;
-				return 0;
+				return START;
 			}
 		default:
-			return 0;				
+			return START;				
 	}
 }
 
@@ -471,21 +464,19 @@ int llread(unsigned char *packet)
 {
 	printf("I try to read the frame\n");
     // to wait the header
-	int count = 0;
+	LinkLayerState state = START;
 	char byte;
-	state s;
+	which_frame s;
 	usleep(DELAY);
-	while (count < 4 && count != -1){
+	while (state != BCC_OK && state != ERR){
 		if (read(fd, &byte, 1) > 0){
-			count = waitHeader(byte, count, &s);
+			state = waitHeader(byte, state, &s);
 			byte_received++;
 		}
 	}
-	if (count == -1) // disc
+	if (state == ERR) // disc
 		return 0;
 	printf("Header arrived\n");
-	if (count == -1) 
-		return 0;
 	int count_bytes = 0, end = 0, esc = 0;
 	unsigned char bcc = 0x00, bcc_back; 	
 	unsigned char *bits = malloc((MAX_PAYLOAD_SIZE + 1) * sizeof(unsigned char));
@@ -554,35 +545,35 @@ int llread(unsigned char *packet)
 int llclose(int showStatistics, LinkLayerRole role)
 {	
 	char byte;
-	int count = 0;
+	LinkLayerState state = START;
 	alarmEnabled = FALSE;
 	alarmCount = 0;
 	switch(role){
 		case LlTx:
 			
 			(void)signal(SIGALRM, alarmHandler);
-			while(alarmCount < parameters.nRetransmissions && count < 5){
+			while(alarmCount < parameters.nRetransmissions && state != STOP){
 				usleep(DELAY); 
-				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
-					count = checkSframe(byte, count, 0x01, 0x0B);     
+				while(read(fd, &byte, 1) > 0 && state != STOP && alarmEnabled){
+					state = checkSframe(byte, state, 0x01, 0x0B);     
 				}
-				if (count == 5){
+				if (state == STOP){
 					alarm(0);
 					alarmEnabled = 1;
 				}
-				if (alarmEnabled == FALSE && count < 5){
+				if (alarmEnabled == FALSE && state != STOP){
 					sendSFrame(0x03, 0x0B);
 					alarm(parameters.timeout);
 					alarmEnabled = TRUE;					
 				}			
 			}
 			usleep(DELAY); 
-			while(count < 5 && read(fd, &byte, 1) > 0){ // we can put something like another timer here
-					count = checkSframe(byte, count, 0x01, 0x0B); 
-						if (count == 0)
+			while(state != STOP && read(fd, &byte, 1) > 0){ // we can put something like another timer here
+					state = checkSframe(byte, state, 0x01, 0x0B); 
+						if (state == START)
 							return -1;
 				}
-			if (count != 5)
+			if (state != STOP)
 				return -1;
 			
 			sendSFrame(0x03, 0x07);
@@ -598,19 +589,19 @@ int llclose(int showStatistics, LinkLayerRole role)
 		case LlRx:
 			(void)signal(SIGALRM, alarmHandler);
 			
-			while(alarmCount < parameters.nRetransmissions && count < 5){
+			while(alarmCount < parameters.nRetransmissions && state != STOP){
 				usleep(DELAY); // NOT SURE YET
-				while(read(fd, &byte, 1) > 0 && count < 5 && alarmEnabled){
-					count = checkSframe(byte, count, 0x03, 0x07);     
+				while(read(fd, &byte, 1) > 0 && state != STOP && alarmEnabled){
+					state = checkSframe(byte, state, 0x03, 0x07);     
 					byte_received ++;
 				}
-				if (count == 5){
+				if (state == STOP){
 					end_time = clock();
 					alarm(0);
 					alarmEnabled = 1;
 					byte_received_approved += 5;
 				}
-				if (alarmEnabled == FALSE && count < 5){
+				if (alarmEnabled == FALSE && state != STOP){
 					sendSFrame(0x01, 0x0B);
 					alarm(parameters.timeout);
 					alarmEnabled = TRUE;
@@ -618,7 +609,7 @@ int llclose(int showStatistics, LinkLayerRole role)
 				}
 			
 			}
-			if (count != 5){
+			if (state != STOP){
 				printf("The connection has been closed because the frame DISC has been received, but the receiver didn't receive the UA frame, so something could have gone wrong, check if the file is ok\n");
 				end_time = clock();
 			}
